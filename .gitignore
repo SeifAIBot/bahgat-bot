@@ -18,3 +18,7 @@ __pycache__/
 # Logs and OS junk.
 *.log
 .DS_Store
+
+training/raw/
+training/work/
+training/samples/
