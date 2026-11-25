@@ -1,0 +1,5 @@
+# Dev-only deps: tests + lint. Never installed in the production image.
+# Pinned to the versions verified installed in .venv on 2026-11-25.
+pytest==9.2.0
+pytest-asyncio==1.5.0
+ruff==0.17.6

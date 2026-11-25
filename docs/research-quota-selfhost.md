@@ -1,0 +1,72 @@
+# Research: self-hosted / custom model on FREE GPU (2026-11-25)
+
+Independent subagent research, web sources cited. Question: can a custom model give ~1,500 replies/day (~100/user/day, 15 users, 1-2 groups) for $0, 24/7?
+
+## Verdict
+No free option gives true 24/7 always-on serving at 1,500 replies/day with zero effort and zero risk. Limit is a HOSTING problem not a MODEL problem — fine-tuned model does not raise limit, because limit is GPU-hours, nobody gives away unlimited GPU-hours.
+Honest ranking:
+1. Modal $30/month free credits strongest lever — ~50 T4-hours/month ~ ~1,000 replies/day self-hosted, serverless, no card for Starter. Does not quite cover 1,500/day alone, overage billing risk to verify.
+2. Kaggle T4 raw hours (30 GPU-h/week) but notebook not server — 12h sessions, no public endpoint, using as 24/7 API host against spirit of service.
+3. Oracle Always Free only truly 24/7 always-on free host — but no GPU, halved June 2026 (4 OCPU/24GB -> 2 OCPU/12GB). Can run 3-4B model ~15-20 tok/s, 8B at this volume gives 30-60s replies. Fallback tier, not main engine.
+4. Cheapest real "limit raise" is not self-hosting: OpenRouter one $10 purchase (once, not subscription) raises free-model access 50 -> 1,000 requests/day, no token cap. Nearly doubles current free-API capacity.
+Recommended: hybrid — self-hosted small model (Modal and/or Oracle CPU) for simple chat/roasts, Gemini/Groq for hard/search, OpenRouter overflow. Realistic free ceiling ~1,000-1,500 replies/day, with effort and fragility. If user wants "set and forget, never think about limits", no $0 answer; cheapest honest paid answer ~$10 once (OpenRouter) or ~$15/month (Modal overage / cheap T4 rental).
+
+## Math
+Per reply current prompt ~1,500 input + ~200 output ~ 1,700 tokens/reply. 1,500 replies/day x 1,700 ~ 2.5M tokens/day. Groq free 200k TPD/model, 120b+20b = 400k/day ~ ~235 replies/day. Gemini flash-preview planning 20 RPD. OpenRouter :free 50 RPD unfunded. Current free-API stack ~300-500 replies/day realistic. Gap to 1,500 is ~3-5x.
+Self-hosted T4: 8B Q4 decodes ~46 tok/s (llama.cpp leaderboard Llama-2 7B Q4_0 tg128 46.38 tok/s). 200-token reply ~4.3s + ~1.2s prefill for 1,500-token prompt (pp512 ~1,219 tok/s) ~ ~6s GPU/reply. 1,500 replies = ~2.5 GPU-hours/day = ~17.5 GPU-h/week = ~75 GPU-h/month. Number every free tier must beat.
+
+## Free GPU/hosting options (late 2026)
+- Google Colab free: T4 16GB, 12h max session, ~90 min idle disconnect, ~15-30 GPU-h/week unpublished throttled. NO 24/7. Dead for serving. Colab FAQ prohibits: "file hosting, media serving, or other web service offerings not related to interactive compute" disallowed, free runtimes running web UI "may be terminated at any time without warning". Good only one-off fine-tuning.
+- Kaggle free: 2x T4 16GB each, 30 GPU-h/week guaranteed, 12h max session, background execution (can close browser). NO 24/7. Raw hours cover 17.5 h/week need with headroom. But 12h sessions restart ~2x/day, NO public inbound endpoint (needs tunnel ngrok/Cloudflare Tunnel), notebook service not host. P100 retired 15 Sep 2026; T4x2 only free GPU.
+- Hugging Face Spaces free: CPU Basic 2 vCPU/16GB (sleeps after 48h idle); ZeroGPU shared RTX Pro 6000 Blackwell 5 min/day free. No. Dead for serving. 5 GPU-min/day ~30k tokens ~17 replies/day. CPU tier could run 3B slowly but sleeps/cold-starts.
+- Oracle Always Free (A1 ARM): 2 OCPU / 12GB RAM, 24/7, forever (was 4/24GB — cut 15 June 2026); 200GB disk; no GPU. YES — only true 24/7 free host. CPU-only: 7B Q4 ~5-8 tok/s on 4 OCPU (older guides), ~17 tok/s for 1.7B Q4 on 2 cores (measured Nov 2026). 8B on 2 cores ~3-5 tok/s -> 200 tokens 40-60s + slow prefill. 1,500 replies x ~50s = 20+ hours compute/day — impossible. 3-4B model honest fit. Also A1 capacity scarce ("Out of host capacity" common), 7-day idle-reclamation rules.
+- Modal (Starter): $30/month free compute credits, T4 ~$0.59/h, per-second billing, scale-to-zero, no card for Starter. Effectively yes (serverless). BEST free GPU option. $30 / $0.59 ~ ~50 T4-h/month ~ 30k replies/month ~ ~1,000/day at 6s/reply. Short of 1,500/day alone, closest. Caveats: cold starts (model load ~10-15s, mitigated by GPU memory snapshots), verify billing behaviour before relying — what happens at $30.01 must be checked; set usage caps.
+- RunPod: no free credit (only $1k startup program VC-backed/pre-Series A). N/A.
+- Lightning AI: up to 50 free GPU-hours ONE-TIME, not recurring. One-off fine-tune, not serving.
+- Together AI / Nebius / Lambda: startup/research grants only (up to $15-50k, application + funding criteria). N/A personal hobby bot.
+Free-API stacking (non-self-hosted lever): Groq 200k TPD/model 2 models, Gemini per-project, OpenRouter :free 20 RPM 50 RPD unfunded -> 1,000 RPD after one-time $10 credit purchase (verified Nov 2026; extra accounts/keys do NOT multiply limits, OpenRouter governs globally, upstream 429s common), SambaNova free tier 20 RPM 20 RPD 200k TPD/model tiny, Cerebras was 1M tokens/day free; since Oct 2026 card-gated $5 trial expiring 30 days no permanent free tier, Cloudflare Workers AI 10k neurons/day. Multiple Gemini projects each own free quota — legitimate for separate projects, but creating many accounts to dodge limits violates ToS; flag, don't do it.
+
+## Best small open models for Arabic chat (2026)
+- Qwen3-8B: 8.2B ~5-6GB Q4. Best multilingual Arabic on HELM Arabic among consumer-size models; 119 languages; thinking/non-thinking; 32k native context (128k YaRN). BEST general pick. Strongest reasoning small models; one to fine-tune.
+- AceGPT-v2-8B-Chat: 8B 4.9GB Q4, 8k context, Ollama available. #6 Balsam Index (0.5590) — 8B Arabic-specialised scoring above 685B general MoE; Arabic-first (Llama-3 base, native alignment); strong dialect/culture per AraDiCE. Best Arabic-purity pick. 8k context tight for 1,500-token prompt + long history but workable.
+- Nile-Chat-4B / 12B (MBZUAI-Paris): 4B (~2.5GB Q4) / 12B. SOTA Egyptian dialect specifically — trained Egyptian transcripts/forums/lyrics, Arabic + Latin-script Arabizi; 12B beats Qwen2.5-14B by 14.4% on Latin-script Egyptian benchmarks; 4B avg 57.85 vs Gemma-3-4B 48.76 Egyptian suite. BEST Egyptian-dialect pick, but 4B much weaker general reasoning/knowledge than 8B, 2,048-token training length real constraint for 1,500-token prompt. 12B doesn't fit free CPU, heavy on T4 (Q4 ~7GB fine but slower).
+- Jais 3 (MBZUAI/Inception42, Oct 2026): 7B / 32B Apache 2.0. Top Arabic-native local LLM 2026 per round-ups; replaces Jais 30B. Promising but newest, least tooling/community recipes.
+- Llama-3.1-8B-Instruct: 8B ~5GB Q4. Proven huge ecosystem decent Arabic; older (Dec 2023 cutoff) weaker Arabic than Qwen3/AceGPT. 128k. Safe fallback not best Arabic choice.
+- Gemma-3-4B/12B, Mistral-7B, Aya: Gemma 4 31B leads generative Arabic boards (HELM 0.823) but 31B too big for free tiers; Aya multilingual not Egyptian-specialised. Not recommended at this size/price.
+Recommendation: Qwen3-8B base (best balance Arabic quality, reasoning, 32k context, ecosystem), AceGPT-v2-8B alternate if Arabic purity > reasoning, Nile-Chat-4B Oracle-CPU candidate (small enough usable speed on 2 cores).
+Reality check: best open 8B still clear step below gpt-oss-120b / Gemini Flash on hard questions, factual accuracy, instruction-following (Balsam: gpt-oss-120b 0.5591 vs AceGPT-v2-8B 0.5590 knowledge MCQ — close on MCQ, gap widens open-ended chat/reasoning/tool use). 8B GOOD at banter/roasts Egyptian dialect, MEDIOCRE at search synthesis/factual answers. Exactly why hybrid keeps big free APIs for hard questions.
+
+## Serving stack
+- llama.cpp server (llama-server) — best for this job: single binary, GGUF, OpenAI-compatible API, continuous batching (--parallel slots), GPU AND CPU, smallest footprint. T4 8B Q4 ~46 tok/s single-stream; Oracle CPU 3-4B Q4 ~15-30 tok/s. Recommended both Modal/Kaggle GPU and Oracle CPU.
+- Ollama — same engine underneath (llama.cpp), easiest setup, model library incl AceGPT-v2-8B. Slightly slower than raw llama.cpp batch 1 some benchmarks, silently offloads layers to CPU if VRAM short (speed cliff — check ollama ps). Good Oracle box and quick tests.
+- vLLM — wins only concurrency >=4-8 (continuous batching, PagedAttention: 700 tok/s at 64 concurrent on 4090 vs ~100 llama.cpp/Ollama). At 1-2 concurrent ties or LOSES to llama.cpp single-stream, on T4 (Turing sm_75 no bf16) poor fit — prebuilt wheels target Ampere 8.0+. NOT recommended free tiers.
+- LiteLLM — useful as ROUTER in front (one OpenAI-compatible endpoint, fallbacks, per-provider budgets). Bot already has own router; LiteLLM optional replacement not serving engine.
+Latency (T4, Qwen3-8B Q4, llama.cpp): ~6s/reply (1.2s prefill + 4.3s decode). Oracle CPU (Nile-Chat-4B Q4, 2 cores): ~15-20 tok/s -> 200 tokens 10-13s + prefill several seconds -> ~15-25s/reply. Acceptable fallback, poor main path.
+
+## Custom/fine-tuned model (LoRA) — what it actually buys
+- Feasible and cheap: QLoRA free Colab T4. 8B QLoRA needs ~6GB VRAM (fits T4 16GB); Unsloth trains ~2x faster 60-70% less VRAM than stock PEFT. Data: 500-2,000 clean examples sweet spot for style/voice (few hundred clean beat 10k noisy); 1k examples ~2h Colab T4; 5k ~6h. Rank r=16, lr 2e-4, 2-3 epochs. Adapter ~100MB.
+- Dataset for Bahgat: transcribe ~2-3h clean Bahgat audio with Whisper (faster-whisper free local/Colab), split turns, keep Bahgat-only lines, build 300-500 (user -> Bahgat reply) pairs. Real work ~1 day compute + manual cleanup. Arabic WER worse than English; expect 10-20% lines need correction.
+- Does it beat prompt engineering? Style/voice/format — yes, LoRA reliably teaches house tone, beats long system prompt, SAVES input tokens (shorter system prompt -> cheaper calls). Facts/knowledge — no, LoRA teaches no new facts; search + grounding still does that. Rule: fine-tune when prompt + RAG cannot reach quality after honest tuning and >=500 good examples; with <100 examples RAG + prompt almost always wins.
+- Critical: fine-tuning does NOT raise limit. Fine-tuned 8B still needs same GPU-hours to serve. Anyone selling "custom model = unlimited" confuses quality upgrade with capacity upgrade.
+
+## Risks
+1. Colab/Kaggle as 24/7 server violates terms (Colab explicitly; Kaggle by design). Accounts throttled/banned; sessions die (12h cap, idle timeout, quota exhaustion, "Out of host capacity").
+2. Oracle halved free tier June 2026 (4 OCPU/24GB -> 2/12GB) no notice pattern — free tiers shrink. A1 hard to provision busy regions.
+3. Modal $30 is credits not grant with hard stop you control — verify what happens past $30 (card required? auto-charge?) set budget cap before pointing bot at it.
+4. Free-API limits change constantly — Cerebras permanent 1M/day -> card-gated 30-day trial Oct 2026; OpenRouter free lineup turned over Jul-Oct 2026. Re-check at build time.
+5. 8B self-hosted weaker than current Gemini/Groq brain on hard questions — self-hosting trades quality for volume. Hybrid contains trade-off.
+6. Cold starts and restarts — every restart (Kaggle 12h, Modal scale-to-zero, Oracle reboot) model reload (~10-60s) dropped in-flight replies; bot needs queue + retry design.
+
+## Recommended setup (concrete, hybrid)
+Three tiers, router decides (extends bot's existing Groq-first router):
+- Tier 1 self-hosted small model (bulk chat, roasts, banter): Qwen3-8B Q4_K_M (+ LoRA adapter trained on Bahgat transcripts) served by llama-server on Modal (T4, $30/mo free credits, scale-to-zero). Expected ~6s/reply, ~1,000 replies/day within free credits. This is "custom model with big limit".
+- Tier 1b always-on fallback: Nile-Chat-4B Q4 (or Qwen3-4B) on Oracle Always Free (2 OCPU/12GB) via Ollama/llama.cpp, 24/7. Slower (~15-25s/reply) but never sleeps; catches traffic when Modal cold/down and serves bot process itself (bot already runs on Render; move it to Oracle and DB stops being wiped on redeploy — fixes v0.4/v0.5 Render SQLite problem as side effect).
+- Tier 2 free APIs hard/search: Groq (gpt-oss-20b simple, 120b hard) + Gemini Flash, as today.
+- Tier 3 overflow: OpenRouter :free (50 RPD now; 1,000 RPD after one-time $10 purchase — single best $/limit trade available, if user ever spends anything).
+- Fine-tune (one-off, free): QLoRA Colab T4, 500-1,000 Bahgat transcript pairs, r=16, ~2h, adapter ~100MB, merged or served as adapter on Qwen3-8B. Do AFTER live group test proves prompt-based persona works — quality upgrade not prerequisite.
+Capacity with stack (estimates): Modal ~1,000/day + Groq ~235/day + Gemini ~20-250/day + OpenRouter 50 (or 1,000 after $10) ~ ~1,300-1,500/day free, ~2,300/day with $10 OpenRouter. Per-user 100/day reachable; "unlimited" not — binding constraint becomes Modal credits + Groq TPD, busy days still need queue to shed load gracefully.
+Effort: ~1 day build Modal serving endpoint + router tier; ~1 day Oracle box (bot + fallback model + systemd); ~1-2 days LoRA dataset + training + evaluation. Ongoing: restarts/monitoring of free tiers (not set-and-forget).
+
+Note: no files edited; no accounts created. All limits third-party/secondary-source snapshots Nov 2026, re-verify on provider's own page at build time — free tiers changed materially in 2026 (Oracle halved A1 June, Cerebras ended free tier October, OpenRouter free lineup turned over).
+
+Sources: research.google.com colaboratory/faq; fastero.com google-colab-limits; fastero.com kaggle-gpu; dev.to viswaretas_kotra free-cloud-gpus; stacksfree.com hugging-face-spaces-free-tier-guide-2026; freetier.wiki hugging-face-spaces; dev.to travenwest oracle-cloud-free-tier-2026; wyh.io free-server-free-model; blog.easecloud.io launch-oracle-cloud-llms; blogs.oracle.com cpu-based-inference; perkstack.co free-gpu-credits-startups; buildaicurrent.com free-gpu-credits; perq.sh gpu; stackreferee.com modal vs runpod; promptquorum.com best-arabic-local-llms-2026; notes.ma7.dev arabic-llm-evaluation; arxiv.org 2507.04569v1 Nile-Chat; ollama.com ahmgam/acegpt-v2; siliconflow.com best-open-source-llm-for-arabic; knightli.com llama-cpp-gpu-benchmark; aihubhq.com vllm; vramfarm.com vllm-vs-ollama-vs-llama-cpp; specpicks.com ollama-vs-vllm-vs-llama-cpp; dev.to gde six-serving-engines-tesla-t4-gemma; aihubhq.com fine-tune-llm-lora; aitoolspro.tech fine-tune-small-llm; codersera.com fine-tuning-llms-2026; askaiml.com fine-tuning; openrouter.ai collections/free-models; teamday.ai openrouter-free-model-limits-2026; opengpuradar.com verified-free-llm-apis; free.branolabs.com llms.txt; devhunt.org free-apis/llm.

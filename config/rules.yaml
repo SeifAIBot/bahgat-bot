@@ -1,0 +1,14 @@
+# Owner + safety rules — only Seif controls the bot.
+# owner_id lives ONLY in .env / Render env (OWNER_ID). It used to be duplicated
+# here; a committed copy is a second source of truth and a personal identifier
+# in the repo, so it was removed. Code reads settings.owner_id, never this file.
+owner_only_commands:
+  - reload config
+  - change mood
+  - mute / unmute
+  - stop insulting a member
+  - clear memory for a member
+
+group_admins_have_no_control: true
+bot_is_parody: true
+bot_bio_must_say: "بوت بارودي — مش بهجت صابر الحقيقي"

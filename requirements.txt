@@ -1,0 +1,10 @@
+# Bahgat Bot — free stack, runtime deps only (dev deps: requirements-dev.txt)
+python-telegram-bot==21.11.1
+pydantic-settings==2.10.1
+PyYAML==6.0.2
+python-dotenv==1.0.1
+yt-dlp>=2026.7.4
+edge-tts==7.2.1
+beautifulsoup4==4.13.4
+# LLM clients (OpenAI-compatible endpoints)
+openai==1.99.0

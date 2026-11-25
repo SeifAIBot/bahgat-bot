@@ -1,0 +1,20 @@
+# Secrets — NEVER commit real keys/tokens. .env.example (empty values) is safe.
+.env
+.env.*
+!.env.example
+# Runtime state: SQLite DB, downloads, voice files, heartbeat.
+data/
+*.db
+*.db-wal
+*.db-shm
+downloads/
+voice/
+# Python / tooling caches.
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+# Logs and OS junk.
+*.log
+.DS_Store

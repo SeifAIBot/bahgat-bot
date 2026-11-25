@@ -1,0 +1,4 @@
+plugins:
+  - search_plugin
+  - youtube_plugin
+  - voice_plugin

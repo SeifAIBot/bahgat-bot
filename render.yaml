@@ -1,0 +1,51 @@
+# Render: FREE WEB SERVICE (type: web, plan: free).
+#
+# WHY NOT A WORKER: Render Free does NOT cover background workers — only
+# web services, Postgres, Key Value and static sites ("Other service types
+# don't support Free instances", docs.render.com/free). The old render.yaml
+# as a Background Worker can NOT deploy free. A web service must bind $PORT
+# — the bot does that: main.py starts the stdlib health server (tg/health.py,
+# GET /healthz on 0.0.0.0:$PORT) before run_polling starts.
+#
+# FREE-TIER TRADE-OFFS (say them plainly, see docs/DEPLOY.md):
+# - Sleeps after 15 min without inbound traffic (~30-60s wake). An external
+#   pinger (cron-job.org, every 10 min against /healthz) keeps it awake.
+# - Ephemeral disk: every redeploy/restart/spin-down WIPES data/bahgat.db —
+#   per-member memory, moods, grudges, quotas all reset. EXPECTED on this
+#   first deploy; Turso/R2 persistence is a separate later step.
+# - 750 free instance hours/month = exactly ONE service 24/7. Never add a
+#   second Render service (e.g. a pinger) — it would burn the same budget.
+#
+# Secrets: keys with `sync: false` are NOT in this file — Render asks for
+# them in the Dashboard (Environment tab) at deploy time. Seif pastes his
+# own keys himself; Muse's Secure Vault keys are NOT available to Render.
+# Never put a real key value in this file or in git.
+services:
+  - type: web
+    name: bahgat-bot
+    env: docker
+    region: frankfurt
+    plan: free
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OWNER_ID
+        value: "1415214630"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: ALLOWED_CHAT_IDS
+        value: "-1005812444791"
+      # Messages sent while the bot slept must be DELIVERED on wake, not
+      # discarded — Telegram holds updates 24h. Default in code is true;
+      # Render sleeps, so this deployment MUST be false.
+      - key: DROP_PENDING_UPDATES
+        value: "false"
+      - key: LOG_LEVEL
+        value: "INFO"
