@@ -176,6 +176,22 @@ def make_update(msg, user, chat_id, update_id=100):
 
 
 @pytest.fixture(autouse=True)
+def _tmp_bank_db(monkeypatch, tmp_path):
+    """Isolate the persisted bank-rotation window (v1.6 phase 2):
+    _pick() records every served line in brain.memory's bot_state, so
+    without this the window would leak between tests (and into the
+    real data/bahgat.db)."""
+    from brain import memory
+
+    db = tmp_path / "bank-test.db"
+    monkeypatch.setattr(memory, "DB_PATH", db)
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+    memory.init_db()
+    yield
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+
+
+@pytest.fixture(autouse=True)
 def reset_handler_state():
     for d in (h._last_reply_time, h._last_cooldown_notice, h._last_send, h._send_count,
               h._seen_callbacks, h._membership_cache, h._chat_locks,

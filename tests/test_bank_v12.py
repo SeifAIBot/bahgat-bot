@@ -31,6 +31,22 @@ CHAT_ID = -1005812444791
 
 
 @pytest.fixture(autouse=True)
+def _tmp_bank_db(monkeypatch, tmp_path):
+    """Isolate the persisted bank-rotation window (v1.6 phase 2):
+    _pick() records every served line in brain.memory's bot_state, so
+    without this the window would leak between tests (and into the
+    real data/bahgat.db)."""
+    from brain import memory
+
+    db = tmp_path / "bank-test.db"
+    monkeypatch.setattr(memory, "DB_PATH", db)
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+    memory.init_db()
+    yield
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_bank_state():
     reload_bank()
     for d in (h._last_reply_time, h._last_cooldown_notice, h._last_send,
@@ -171,12 +187,16 @@ def test_pick_member_safe_filter_is_exact(monkeypatch):
     ]}
     rb._last_used.clear()
     assert _pick("roast", CHAT_ID, member_safe_only=True) == "يا معفن"
-    assert _pick("roast", CHAT_ID, member_safe_only=False) in (
-        "يا معفن", "يا ابن الكلب")
+    # Only the family line is left unused, so the full pool serves it.
+    assert _pick("roast", CHAT_ID, member_safe_only=False) == "يا ابن الكلب"
     # ...and with the safe line recently used, the full pool still serves.
     rb._last_used.clear()
     monkeypatch.setattr(rb.random, "choice", lambda xs: xs[-1])
-    assert _pick("roast", CHAT_ID, member_safe_only=False) == "يا ابن الكلب"
+    # v1.6 phase 2: clearing the in-memory last-5 no longer resets
+    # rotation — the persisted window still holds BOTH lines, so the
+    # pick falls back to the least-recently-used line ("يا معفن"),
+    # and the member-safe pick serves it too.
+    assert _pick("roast", CHAT_ID, member_safe_only=False) == "يا معفن"
     assert _pick("roast", CHAT_ID, member_safe_only=True) == "يا معفن"
 
 

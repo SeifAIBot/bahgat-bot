@@ -72,6 +72,17 @@
 # never served at a member). The Mido line is the first subject-targeted user roast (ro-43,
 # target: ميدو). One resubmission ("ايه الشرمطه دي") was skipped by the page itself as an exact
 # duplicate of round-2's in-34. Page total now 45 lines (24 round 1 + 9 round 2 + 12 round 3).
+# v1.6 phase 2 (2026-11-26): contextual insult selection — every served insulted/roast line
+# carries `situations:` tags (insulted: mocked 10, dismissed 8, sworn-at 6, general 11,
+# called-dumb 4, family-attacked 4, repeated-insult 4, threatened 3; roast: general 18, perv 14,
+# stupid-statement 9, arrogant 4, annoying 2; roast `cowardly` has NO line yet and falls back to
+# general). Detection is deterministic keywords in brain/intent.py (no LLM call); _pick() prefers
+# matching lines, falls back to general, then any unused line, then the least-recently-used line.
+# The no-repeat window is persisted in bot_state (last 25 per chat + last 10 per user), replacing
+# the in-memory last-5. Mood bump is severity-weighted (family attack +60, mild mock +30,
+# default +40). in-38 stays feminine-addressed with no gender gating (flagged, same as ro-23).
+# The insult regex in brain/intent.py was also widened: it only knew 5 tame nouns, so "يا معرص" /
+# "يا شرموط" / "يا وسخ" / "يا ابن الكلب" never reached the bank at all.
 #
 
 entries:
@@ -332,6 +343,7 @@ entries:
   - id: in-01
     trigger: insulted
     line: احا!
+    situations: [general]
     source: committee-girl_full.txt
     confidence: verbatim
     notes: '"احا" in 13 segments; strongest in funny-komanda (7) and committee-girl (2).'
@@ -339,6 +351,7 @@ entries:
   - id: in-02
     trigger: insulted
     line: احا زبر احا
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: verbatim
     notes: Shouted twice in a row in the transcript ("احا زبر" then "احا زبر احا" x2). Person-only profanity.
@@ -346,6 +359,7 @@ entries:
   - id: in-03
     trigger: insulted
     line: يا معرص! يا وسخ!
+    situations: [sworn-at, family-attacked]
     source: train-accident_full.txt
     confidence: verbatim
     notes: Excerpt of the clean rapid-fire segment "يا معرص. يا وسخ. يا ناتا. يا موتعفا." — only the two
@@ -354,6 +368,7 @@ entries:
   - id: in-04
     trigger: insulted
     line: مش قد الشيلة ما تشيلش
+    situations: [dismissed]
     source: committee-girl_full.txt
     confidence: verbatim
     notes: His signature put-down; the phrase repeats twice inside one segment. Use when someone challenges
@@ -362,6 +377,7 @@ entries:
   - id: in-05
     trigger: insulted
     line: خارا خارا
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: verbatim
     notes: Standalone segment (~1188s), his disgusted exclamation in the middle of the Sisi rant. One short
@@ -370,6 +386,7 @@ entries:
   - id: in-06
     trigger: insulted
     line: ما يغركش كلامي السافل، أنا متعلم
+    situations: [called-dumb]
     source: funny-komanda_full.txt
     confidence: cleaned
     notes: Raw Whisper "ما يغرقش كلمي السافل امباقا انا متعلمه وولا" (~68s) — "ما يغرقش" is garble of "ما
@@ -379,6 +396,7 @@ entries:
   - id: in-07
     trigger: insulted
     line: إنت معرّص وكافر
+    situations: [sworn-at]
     source: lina-live_full.txt
     confidence: cleaned
     notes: Raw [5338.37 - 5339.89] "وانت معرّس وكافر" — "معرّس" is Whisper garble of "معرّص". Bahgat firing
@@ -389,6 +407,7 @@ entries:
   - id: in-08
     trigger: insulted
     line: يا محمد خرا
+    situations: [general]
     source: lina-live_full.txt
     confidence: approximate
     notes: 'Raw [5614.10 - 5619.56] "يا محمد خرى / يا محمد خرى" (twice). Attribution uncertain: in the محمد
@@ -407,6 +426,7 @@ entries:
   - id: in-09
     trigger: insulted
     line: لا لا يا شرموطة
+    situations: [sworn-at]
     source: lina-live_full.txt
     confidence: verbatim
     notes: Raw [1727.38 - 1729.38] "لا لا يا شرموطة" — Bahgat to Lina in the "حفيدتك تكون شرموطة زيك"
@@ -416,6 +436,7 @@ entries:
   - id: in-10
     trigger: insulted
     line: أنا بسألك إنت شرموطة
+    situations: [mocked]
     source: lina-live_full.txt
     confidence: cleaned
     notes: Raw [1735.72 - 1737.26] "انا مسألك انت شرموطة" — "مسألك" is Whisper spelling of "بسألك".
@@ -424,6 +445,7 @@ entries:
   - id: in-11
     trigger: insulted
     line: إنت كافر ومدلس
+    situations: [sworn-at, dismissed]
     source: lina-live_full.txt
     confidence: cleaned
     notes: Raw [5462.36 - 5469.98] "عخم امتكافر ومدلس. امتكافر ومدلس." — "عخم" dropped as garble,
@@ -433,6 +455,7 @@ entries:
   - id: in-12
     trigger: insulted
     line: لماذا يا سيد مدلس؟
+    situations: [mocked]
     source: lina-live_full.txt
     confidence: cleaned
     notes: Raw [5475.28 - 5481.16] "اسألني لماذا? لماذا يا سيد مدلس? اولا ايه بتمارس الضعارة" — trimmed to
@@ -442,6 +465,7 @@ entries:
   - id: in-13
     trigger: insulted
     line: مسلم إيه يا متناك؟
+    situations: [dismissed]
     source: train-accident_full.txt
     confidence: cleaned
     notes: Raw [1085.58 - 1091.98] "الكالب يا واطية معرص. مصلم ايه يا متنك?" — the family-insult head
@@ -451,6 +475,7 @@ entries:
   - id: in-14
     trigger: insulted
     line: إنت بتستخف بالناس
+    situations: [dismissed]
     source: christian_full.txt
     confidence: cleaned
     notes: Raw [193.14 - 196.54] "باس يهديف بها ان انت تستخف بالناس" — garbled head ("باس يهديف بها")
@@ -460,6 +485,7 @@ entries:
   - id: in-15
     trigger: insulted
     line: لسه قحبة صغيرة غبية
+    situations: [called-dumb, mocked]
     source: lina-live_full.txt
     confidence: cleaned
     notes: Raw [1649.24 - 1650.94] "ومانك لسه قحب صغيره غبيه" — "ومانك" dropped as garble ("وما إنك"),
@@ -474,6 +500,7 @@ entries:
   - id: in-16
     trigger: insulted
     line: انيكها و انتا ماسكها
+    situations: [general]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -482,6 +509,7 @@ entries:
   - id: in-17
     trigger: insulted
     line: احترم نفسك بدل ما اركبك يخول بلدك
+    situations: [threatened]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -490,6 +518,7 @@ entries:
   - id: in-18
     trigger: insulted
     line: زبي مانجو متيجي تعالجو
+    situations: [mocked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -498,6 +527,7 @@ entries:
   - id: in-19
     trigger: insulted
     line: يخووووول انيك انتا و الاقرع العرص
+    situations: [sworn-at]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -506,6 +536,7 @@ entries:
   - id: in-20
     trigger: insulted
     line: يا اقرررع
+    situations: [mocked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -514,6 +545,7 @@ entries:
   - id: in-21
     trigger: insulted
     line: حاسس ان زوبي نار
+    situations: [general]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -522,6 +554,7 @@ entries:
   - id: in-22
     trigger: insulted
     line: يا سالب يا مبعر احترم رجولتك حتي
+    situations: [dismissed]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -530,6 +563,7 @@ entries:
   - id: in-23
     trigger: insulted
     line: يخي بزعل علي الشباب
+    situations: [mocked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -538,6 +572,7 @@ entries:
   - id: in-24
     trigger: insulted
     line: يا كس الكلبه هوهو بعيد
+    situations: [sworn-at, family-attacked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -546,6 +581,7 @@ entries:
   - id: in-25
     trigger: insulted
     line: زبي مليان و علي طيزك هيجان
+    situations: [general]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -554,6 +590,7 @@ entries:
   - id: in-26
     trigger: insulted
     line: اخرس اخرس يا مزني يا عرص
+    situations: [repeated-insult]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -562,6 +599,7 @@ entries:
   - id: in-27
     trigger: insulted
     line: هركبك و الف بيك مصر كلها يخول
+    situations: [threatened]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -570,6 +608,7 @@ entries:
   - id: in-28
     trigger: insulted
     line: يا نفسي انيكك بس انا محترم
+    situations: [mocked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -578,6 +617,7 @@ entries:
   - id: in-29
     trigger: insulted
     line: هزها و غور ياض اتفو علي دي اشكال
+    situations: [dismissed]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -586,6 +626,7 @@ entries:
   - id: in-30
     trigger: insulted
     line: مصمص بعيد صدعتنا
+    situations: [repeated-insult]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -594,6 +635,7 @@ entries:
   - id: in-31
     trigger: insulted
     line: لولا اني محترم كنت ركبتك ركوب البعير
+    situations: [threatened]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -602,6 +644,7 @@ entries:
   - id: in-32
     trigger: insulted
     line: يا الللله منك لله
+    situations: [general]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -617,6 +660,7 @@ entries:
   - id: in-33
     trigger: insulted
     line: بطلب منك ممكن انيك حضرتك
+    situations: [mocked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -625,6 +669,7 @@ entries:
   - id: in-34
     trigger: insulted
     line: ايه الشرمطه دي
+    situations: [mocked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -633,6 +678,7 @@ entries:
   - id: in-35
     trigger: insulted
     line: انتا ياض خول يالا ، انتا ياض خول ما تخلي عندك شخصيه
+    situations: [dismissed]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -641,6 +687,7 @@ entries:
   - id: in-36
     trigger: insulted
     line: اخرررررص اخررررررص يا كس الكلب
+    situations: [repeated-insult]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -649,6 +696,7 @@ entries:
   - id: in-37
     trigger: insulted
     line: رد يالااااااااا رد يالا زي الجاموس
+    situations: [called-dumb]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -657,6 +705,7 @@ entries:
   - id: in-38
     trigger: insulted
     line: انتي ست متربيتيش عيب احترمي نفسك ، احتررررمي نفسك يا وليه احترمي نفسك يا وليه
+    situations: [dismissed]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -666,6 +715,7 @@ entries:
   - id: in-39
     trigger: insulted
     line: دي اسمها شرمطه دي يا استاذ الحالة الانتا فيها دي اسمها شرمطه و منيكه
+    situations: [mocked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -674,6 +724,7 @@ entries:
   - id: in-40
     trigger: insulted
     line: ده انا زوبرجي من صغري يا بيبي
+    situations: [general]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -688,6 +739,7 @@ entries:
   - id: in-41
     trigger: insulted
     line: عايزين نعملك بني ادم يكلب و انتا مصمم هحهحهحهح ، منا عايز اعملك بني ادم انتا مصمم تبقا حيوان ليه
+    situations: [called-dumb]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -697,6 +749,7 @@ entries:
   - id: in-42
     trigger: insulted
     line: انا راجل بتاع نسوان ، و الحمد لله معايا مراتي و ميه ميه و فل ربنا تاب علينا يا ابن ال مليش انا في الخولات الزيك يعرص
+    situations: [family-attacked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -707,6 +760,7 @@ entries:
   - id: in-43
     trigger: insulted
     line: عايز ايه ياض يا خول عايز ايه ياض يخول عايز ايه يخول
+    situations: [repeated-insult]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -715,6 +769,7 @@ entries:
   - id: in-44
     trigger: insulted
     line: عليا النعمه انتا اكيد عايز تتناك
+    situations: [general]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -723,6 +778,7 @@ entries:
   - id: in-45
     trigger: insulted
     line: انا اهو يا متناكين انا اهووو
+    situations: [general, family-attacked]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -732,6 +788,7 @@ entries:
   - id: ro-01
     trigger: roast
     line: يا ولد الوسخة
+    situations: [general]
     source: committee-girl_full.txt
     confidence: verbatim
     member_safe: false
@@ -743,6 +800,7 @@ entries:
   - id: ro-02
     trigger: roast
     line: لا لا لا، مش زي الشرموط ابن المتنكة السيسي
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: cleaned
     target: السيسي
@@ -755,6 +813,7 @@ entries:
   - id: ro-03
     trigger: roast
     line: شعب ابن المتناك ده لسه بيدين بالولاء لجيش ابن المتناك ده
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: cleaned
     target: الجيش
@@ -766,6 +825,7 @@ entries:
   - id: ro-04
     trigger: roast
     line: السيسي ده حيوان، حمار كداب
+    situations: [stupid-statement]
     source: funny-komanda_full.txt
     confidence: cleaned
     target: السيسي
@@ -775,6 +835,7 @@ entries:
   - id: ro-05
     trigger: roast
     line: بيقولوا بنته أطول منه وأطول من مراته
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: cleaned
     target: السيسي
@@ -786,6 +847,7 @@ entries:
   - id: ro-06
     trigger: roast
     line: عيلة السيسي يعني عيلة الأقزام
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: cleaned
     target: السيسي
@@ -798,6 +860,7 @@ entries:
   - id: ro-07
     trigger: roast
     line: ندوش العبيطة الهبلة التافهة
+    situations: [stupid-statement]
     source: committee-girl_full.txt
     confidence: cleaned
     target: ندوش
@@ -808,6 +871,7 @@ entries:
   - id: ro-08
     trigger: roast
     line: ما تزعليش مني يا ندوش، انتي بهايم
+    situations: [stupid-statement]
     source: committee-girl_full.txt
     confidence: cleaned
     target: ندوش
@@ -817,6 +881,7 @@ entries:
   - id: ro-09
     trigger: roast
     line: فاشلين! فاشلين!
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: cleaned
     notes: Raw Whisper "فشلين. فشلين." (~641s), his verdict on the army men who "بيزرعوا خيار ويربوا فراخ
@@ -825,6 +890,7 @@ entries:
   - id: ro-10
     trigger: roast
     line: بيزرعوا خيار، ويربوا فراخ، ويصنعوا شوك وسكاكين
+    situations: [stupid-statement]
     source: funny-komanda_full.txt
     confidence: cleaned
     target: الجيش
@@ -835,6 +901,7 @@ entries:
   - id: ro-11
     trigger: roast
     line: بالاتفاق مع كيسنجر الشرموط
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: cleaned
     target: كيسنجر
@@ -845,6 +912,7 @@ entries:
   - id: ro-12
     trigger: roast
     line: ليه يعني انتو خارا
+    situations: [general]
     source: funny-komanda_full.txt
     confidence: verbatim
     notes: Standalone segment (~2236s), Bahgat turning on the couple mid sex-advice talk ("ليه يعني انتو
@@ -853,6 +921,7 @@ entries:
   - id: ro-13
     trigger: roast
     line: عارف لو جبت جحش عنده إسهال هيدير البلد أحسن من السيسي
+    situations: [stupid-statement]
     source: lagan_full.txt
     confidence: cleaned
     target: السيسي
@@ -863,6 +932,7 @@ entries:
   - id: ro-14
     trigger: roast
     line: يعني انتي بتلحسي خرى للعيال
+    situations: [perv]
     source: karma_full.txt
     confidence: verbatim
     target: كارما
@@ -873,6 +943,7 @@ entries:
   - id: ro-15
     trigger: roast
     line: روح البنك كده وقول له عاوز عشر تلاف دولار
+    situations: [arrogant]
     source: lagan_full.txt
     confidence: cleaned
     notes: Raw "أنا عوزك توصل كده للبنك وتقول له عوز عشر تلاف دولار" — his dare to a caller who claimed
@@ -881,6 +952,7 @@ entries:
   - id: ro-16
     trigger: roast
     line: هو الحقير اللي ما بيعرفش يقرا كلمة لا بعربي ولا بإنجليزي، ولا بيفهم في العسكرية ولا المدنية
+    situations: [stupid-statement]
     source: sheikh_full.txt
     confidence: cleaned
     target: السيسي
@@ -891,6 +963,7 @@ entries:
   - id: ro-17
     trigger: roast
     line: هل أم إلهك زانية؟
+    situations: [general]
     source: christian_full.txt
     confidence: verbatim
     target: المسيحي
@@ -901,6 +974,7 @@ entries:
   - id: ro-18
     trigger: roast
     line: هل جدتها زانية؟ هل جدتها الكبرى كانت عاهرة؟
+    situations: [general]
     source: christian_full.txt
     confidence: cleaned
     target: المسيحي
@@ -912,6 +986,7 @@ entries:
   - id: ro-19
     trigger: roast
     line: يا كذاب! يا مدلس! يا معرص!
+    situations: [general]
     source: train-accident_full.txt
     confidence: cleaned
     notes: PROPOSED TRIGGER roast. Raw "يا كتاب. يا مدلس. يا معرص." — "كتاب" is Whisper garble of "كذاب".
@@ -920,6 +995,7 @@ entries:
   - id: ro-20
     trigger: roast
     line: ما تسرحش بينا، خش في السليم
+    situations: [annoying]
     source: train-accident_full.txt
     confidence: cleaned
     notes: PROPOSED TRIGGER roast. Raw "ما تسرحش بينا مهار رس. وخوش في السليم. اتفضل." — "don't wander off
@@ -928,6 +1004,7 @@ entries:
   - id: ro-21
     trigger: roast
     line: عاوز يغير في القرآن يا متناك؟
+    situations: [general]
     source: train-accident_full.txt
     confidence: cleaned
     target: السيسي
@@ -937,6 +1014,7 @@ entries:
   - id: ro-22
     trigger: roast
     line: تفو عليك!
+    situations: [general]
     source: train-accident_full.txt
     confidence: verbatim
     notes: PROPOSED TRIGGER roast. Excerpt of segment "تفو عليك وعلى ربكو أنا غير من هنا" — only the spit
@@ -945,6 +1023,7 @@ entries:
   - id: ro-23
     trigger: roast
     line: بطلي تعريص يا وسخة
+    situations: [perv]
     source: train-accident_full.txt
     confidence: cleaned
     notes: PROPOSED TRIGGER roast. Raw opening segment "بطالي تعريسها محراصة يا واسغا" — "محراصة" dropped
@@ -953,6 +1032,7 @@ entries:
   - id: ro-24
     trigger: roast
     line: يا رب اللي بيعرص للسيسي ربنا يبتليه بحدسة قطر
+    situations: [general]
     source: train-accident_full.txt
     confidence: cleaned
     target: السيسي
@@ -962,6 +1042,7 @@ entries:
   - id: ro-25
     trigger: roast
     line: احا! عربية من سنة 1900، من قبل ما عملوا السكة الحديد يا ولاد دين الكلب
+    situations: [stupid-statement]
     source: train-accident_full.txt
     confidence: cleaned
     target: حادثة القطار
@@ -973,6 +1054,7 @@ entries:
   - id: ro-26
     trigger: roast
     line: مش قادر توفر نور للناس يا ابن دين الكلب
+    situations: [stupid-statement]
     source: train-accident_full.txt
     confidence: cleaned
     target: السيسي
@@ -984,6 +1066,7 @@ entries:
   - id: ro-27
     trigger: roast
     line: البلد بلدنا وهنستردها غصب عن أي ابن دين كلب
+    situations: [general]
     source: train-accident_full.txt
     confidence: cleaned
     member_safe: false
@@ -993,6 +1076,7 @@ entries:
   - id: ro-28
     trigger: roast
     line: اغيثونا اغيثونا يا ولاد دين الكلب، يا اللي بتدعوا إنكم مسلمين
+    situations: [general]
     source: train-accident_full.txt
     confidence: cleaned
     target: السيسي
@@ -1003,6 +1087,7 @@ entries:
   - id: ro-29
     trigger: roast
     line: فين الفلوس يا ابن دين الكلب؟
+    situations: [general]
     source: train-accident_full.txt
     confidence: approximate
     target: السيسي
@@ -1014,6 +1099,7 @@ entries:
   - id: ro-30
     trigger: roast
     line: إيه الصعوبات اللي بتواجه مهنة القحبة اللي زيك؟
+    situations: [perv]
     source: lina-live_full.txt
     confidence: verbatim
     target: لينا
@@ -1023,6 +1109,7 @@ entries:
   - id: ro-31
     trigger: roast
     line: عادي يا أستاذة قحبة
+    situations: [perv]
     source: lina-live_full.txt
     confidence: cleaned
     target: لينا
@@ -1032,6 +1119,7 @@ entries:
   - id: ro-32
     trigger: roast
     line: ربنا يهديك يا قحبة
+    situations: [perv]
     source: lina-live_full.txt
     confidence: cleaned
     target: لينا
@@ -1041,6 +1129,7 @@ entries:
   - id: ro-33
     trigger: roast
     line: حفيدتك تكون شرموطة زيك
+    situations: [perv]
     source: lina-live_full.txt
     confidence: verbatim
     target: لينا
@@ -1052,6 +1141,7 @@ entries:
   - id: ro-34
     trigger: roast
     line: والله إنت عرص كده كده
+    situations: [perv]
     source: lina-live_full.txt
     confidence: cleaned
     notes: Raw [4922.44 - 4924.48] "والله منت عرس كده كده يعني" — "منت" = "إنت", "عرس" is Whisper garble
@@ -1060,6 +1150,7 @@ entries:
   - id: ro-35
     trigger: roast
     line: دعوة الشرموطة مستجابة
+    situations: [perv]
     source: lina-live_full.txt
     confidence: cleaned
     notes: Raw [6138.31 - 6142.13] "ان شاء الله بقولك دعوة الشو اسمه مستجابة. انا اكيد هدعي لك طبعا. دعوة
@@ -1068,6 +1159,7 @@ entries:
   - id: ro-36
     trigger: roast
     line: اللقاء النهاردة مع قحاب
+    situations: [perv]
     source: lina-live_full.txt
     confidence: cleaned
     target: ضيوف اللايف
@@ -1082,6 +1174,7 @@ entries:
   - id: ro-37
     trigger: roast
     line: بص هتجيب زبي و تغرقه كاتشب و مايونيز و تمصمص يسالب
+    situations: [perv]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -1090,6 +1183,7 @@ entries:
   - id: ro-38
     trigger: roast
     line: كنت بموت في عنيك كنت بحبك نيك
+    situations: [perv]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -1098,6 +1192,7 @@ entries:
   - id: ro-39
     trigger: roast
     line: عارف كرستيانو؟ انا زبيانو يا يا منيك لف و صدرها
+    situations: [perv, arrogant]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -1106,6 +1201,7 @@ entries:
   - id: ro-40
     trigger: roast
     line: يا ولاد الزنوه احترمو عقولنا
+    situations: [arrogant]
     source: user-submitted
     confidence: user
     member_safe: false
@@ -1121,6 +1217,7 @@ entries:
   - id: ro-41
     trigger: roast
     line: اهلا اهلا ب المنايك اهلا اهلا مرحب مرحب مرحب بيكو
+    situations: [general]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -1135,6 +1232,7 @@ entries:
   - id: ro-42
     trigger: roast
     line: ابن متناكه و ماشي، مغفل و ماشي ، بتاخد من طيزك يطلع من بقك و ماشي لكن غبي يبن المتناكه كمان
+    situations: [stupid-statement]
     source: user-submitted
     confidence: user
     member_safe: false
@@ -1144,6 +1242,7 @@ entries:
   - id: ro-43
     trigger: roast
     line: يا ميدو مسمعش صوت ، لا عيب يا ميدو عيب
+    situations: [annoying]
     source: user-submitted
     confidence: user
     target: ميدو
@@ -1155,6 +1254,7 @@ entries:
   - id: ro-44
     trigger: roast
     line: بعبصو بعض في حته تانيه يا ولاد ال هو مفيش غير الخرابه دي
+    situations: [perv]
     source: user-submitted
     confidence: user
     member_safe: false
@@ -1166,6 +1266,7 @@ entries:
   - id: ro-45
     trigger: roast
     line: يا متناك يا علق يا عاهر يا داعر يا ملعوب في طيزك ب زوبر حمار وحشي يخول
+    situations: [perv]
     source: user-submitted
     confidence: user
     member_safe: true
@@ -1174,6 +1275,7 @@ entries:
   - id: ro-46
     trigger: roast
     line: قالو ايه قالو ايه خده في طيزه يا سعادت البيه قالو ايه قالو ايه خده في طيزه يا سعادت البيه
+    situations: [arrogant]
     source: user-submitted
     confidence: user
     member_safe: true

@@ -7,6 +7,7 @@ is time-based on read: -10 per hour since updated_at, min 30 base, and the
 decayed mood is PERSISTED back — this is the single decay mechanism
 (brain/mood.py does no per-message decay).
 """
+import json
 import logging
 import re
 import sqlite3
@@ -928,6 +929,65 @@ def set_state(key, value):
         c.commit()
     finally:
         c.close()
+
+
+# --- v1.6 phase 2: persisted bank-rotation window --------------------------
+# The old in-memory last-5 (`brain.reply_bank._last_used`) forgot every
+# served line on restart, so the same comeback could repeat right after
+# a redeploy. The recent-lines window now lives in bot_state as a JSON
+# list per (chat, category) — last 25 served lines are never re-served
+# in that chat — PLUS a per-user window (last 10 lines served to that
+# user in that chat+category), so the same person never gets the same
+# comeback twice in a row even after the chat window has slid past it
+# (e.g. 30 other picks in between). Both windows are best-effort: any
+# storage error degrades to the in-memory window only, never raises.
+
+BANK_RECENT_WINDOW = 25
+BANK_RECENT_USER_WINDOW = 10
+
+
+def _bank_recent_key(chat_id, category, user_id=None):
+    if user_id is None:
+        return f"bank_recent:{chat_id}:{category}"
+    return f"bank_recent_user:{chat_id}:{category}:{user_id}"
+
+
+def get_recent_bank_lines(chat_id, category, user_id=None):
+    """Line ids recently served from `category` in this chat (oldest
+    first), from the persisted window — or the per-user window when
+    `user_id` is given. [] on any error / empty window."""
+    limit = (BANK_RECENT_USER_WINDOW if user_id is not None
+             else BANK_RECENT_WINDOW)
+    try:
+        raw = get_state(_bank_recent_key(chat_id, category, user_id))
+        if not raw:
+            return []
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            return []
+        return [str(x) for x in data if isinstance(x, str)][:limit]
+    except Exception:
+        return []
+
+
+def record_bank_line(chat_id, category, line_id, user_id=None):
+    """Append `line_id` to the chat window (cap 25) and, when
+    `user_id` is given, to that user's window (cap 10). Re-serving a
+    line moves it to the newest end instead of duplicating it."""
+    try:
+        recent = [x for x in get_recent_bank_lines(chat_id, category)
+                  if x != str(line_id)]
+        recent.append(str(line_id))
+        set_state(_bank_recent_key(chat_id, category),
+                  json.dumps(recent[-BANK_RECENT_WINDOW:]))
+        if user_id is not None:
+            urecent = [x for x in get_recent_bank_lines(chat_id, category, user_id)
+                       if x != str(line_id)]
+            urecent.append(str(line_id))
+            set_state(_bank_recent_key(chat_id, category, user_id),
+                      json.dumps(urecent[-BANK_RECENT_USER_WINDOW:]))
+    except Exception:
+        pass
 
 
 def get_cached_file(video_id_or_url, audio_only):

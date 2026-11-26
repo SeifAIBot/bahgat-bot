@@ -97,10 +97,10 @@ from brain import intent as _intent_mod
 from brain import memory as _memory
 from brain import mood as _mood_mod
 from brain import prompt as _prompt_mod
-from brain.intent import detect_fast_reply, detect_intent, detect_prefix_mode, looks_like_insult, looks_like_insult_turn, looks_like_opinion_ask, looks_stalling, looks_unknown
+from brain.intent import detect_fast_reply, detect_insult_situation, detect_intent, detect_prefix_mode, looks_like_insult, looks_like_insult_turn, looks_like_opinion_ask, looks_stalling, looks_unknown
 from brain.reply_bank import looks_like_challenge, match_reply_bank
 from brain.memory import add_message, get_member, recent_messages, save_member
-from brain.mood import update_mood
+from brain.mood import SITUATION_MOOD_BUMP, update_mood
 from brain.prompt import build_system_prompt, temperature_for
 from brain.router import BrainRouter
 from brain.verify import check_reply, escape_html, split_message, voice_check
@@ -1940,7 +1940,15 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     insulted_early = looks_like_insult(text)
     praised_early = _looks_like_praise(text)
     member_early = get_member(user.id)
-    mood_early = update_mood(member_early.get("mood", 30), insulted_early, praised_early)
+    # v1.6 phase 2: the anger bump depends on what the user did — a
+    # family attack (+60) stings more than a mild mock (+30); an
+    # untagged/general insult keeps the old flat +40.
+    _situation_early = (
+        detect_insult_situation(text) if insulted_early else None)
+    mood_early = update_mood(
+        member_early.get("mood", 30), insulted_early, praised_early,
+        insult_bump=SITUATION_MOOD_BUMP.get(_situation_early or "general", 40),
+    )
     bucket_early = _mood_bucket(mood_early)
     norm_early = _normalize_cache_text(text)
     grudge_early = (member_early.get("grudge") or "").strip()
@@ -1992,6 +2000,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             is_reply_to_bot=_reply_to_bot,
             target_is_member=_roast_member,
             target_is_owner=_roast_owner,
+            user_id=user.id,
         )
         if bank is not None:
             member_early["username"] = user.username or ""

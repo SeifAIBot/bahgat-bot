@@ -37,6 +37,22 @@ SISI_LINE = "السيسي ده حيوان، حمار كداب"
 
 
 @pytest.fixture(autouse=True)
+def _tmp_bank_db(monkeypatch, tmp_path):
+    """Isolate the persisted bank-rotation window (v1.6 phase 2):
+    _pick() records every served line in brain.memory's bot_state, so
+    without this the window would leak between tests (and into the
+    real data/bahgat.db)."""
+    from brain import memory
+
+    db = tmp_path / "bank-test.db"
+    monkeypatch.setattr(memory, "DB_PATH", db)
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+    memory.init_db()
+    yield
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_bank_state():
     reload_bank()
     yield
@@ -143,8 +159,11 @@ def test_pick_target_filter_synthetic(monkeypatch):
     # For كارما the Karma line is eligible and last.
     assert _pick("roast", CHAT_ID, target="كارما") == (
         "يعني انتي بتلحسي خرى للعيال")
-    # No target filter at all (other categories) keeps the old behaviour.
-    assert _pick("roast", CHAT_ID) == "يعني انتي بتلحسي خرى للعيال"
+    # No target filter at all — but all three lines are now inside the
+    # no-repeat window, so the pick falls back to the
+    # least-recently-used line (v1.6 phase 2: deterministic LRU on
+    # exhaustion, not a random re-draw): the first-picked generic one.
+    assert _pick("roast", CHAT_ID) == "يا معفن"
 
 
 def test_pick_no_fitting_line_returns_none():

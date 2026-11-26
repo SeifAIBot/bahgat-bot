@@ -28,6 +28,21 @@ OWNER_ID = 1415214630
 
 # --- bare artist after "هات" (live fail #5) ----------------------------------
 
+
+@pytest.fixture(autouse=True)
+def _tmp_bank_db(monkeypatch, tmp_path):
+    """Isolate the persisted bank-rotation window (v1.6 phase 2):
+    _pick() records every served line in brain.memory's bot_state, so
+    without this the window would leak between tests (and into the
+    real data/bahgat.db)."""
+    from brain import memory
+
+    db = tmp_path / "bank-test.db"
+    monkeypatch.setattr(memory, "DB_PATH", db)
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+    memory.init_db()
+    yield
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
 def test_bare_artist_prefix_is_youtube():
     assert detect_prefix_mode("هات مروان موسي") == ("youtube", "مروان موسي")
     assert detect_intent("هات مروان موسي") == "youtube"
@@ -356,12 +371,19 @@ def test_bank_greeting_and_challenge():
 
 def test_bank_rotation_never_repeats_consecutively():
     # Rotation guarantee: a pick never repeats any of the previous 5
-    # picks from the same category (pool 44 > window 5, so the pool never
-    # resets mid-run — the invariant holds strictly).
+    # picks from the same category. v1.6 phase 2: the window is 25
+    # (persisted per chat), not 5 — and "يا بهجت انت حمار" is a
+    # called-dumb insult, so the first picks come from the 4-line
+    # called-dumb pool, then the generic fallback, then the rest of the
+    # pool as the window slides. The invariant holds strictly. Coverage
+    # needs 1200 draws, not 400: the preference tiers mean the 29
+    # non-preferred, non-generic lines only get ~10 of every 25 picks,
+    # so 400 draws left one of them unpicked ~1 run in 10 (observed
+    # flake) — at 1200 draws each such line is picked ~16 times.
     reload_bank()
     picks = [
         match_reply_bank("يا بهجت انت حمار", chat_id=-1001, is_owner=False)
-        for _ in range(400)
+        for _ in range(1200)
     ]
     for i, p in enumerate(picks):
         assert p not in picks[max(0, i - 5):i]
@@ -370,7 +392,8 @@ def test_bank_rotation_never_repeats_consecutively():
     # so missing one entirely is ~1e-5 — effectively deterministic.
     assert len(set(picks)) == 44
     # Small pools (greeting, 4 served lines) reset after exhaustion, so
-    # each 4-block is a full distinct cycle — the v1.1 pattern.
+    # each 4-block is a full distinct cycle — the v1.1 pattern (v1.6
+    # phase 2: the reset is a deterministic least-recently-used cycle).
     reload_bank()
     g1 = [match_reply_bank("اهلا يا بهجت", chat_id=-1001) for _ in range(4)]
     assert len(set(g1)) == 4

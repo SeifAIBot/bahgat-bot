@@ -286,8 +286,20 @@ _INSULT_RE = re.compile(
     # this regex entirely, so no insult path fired for it. Longest
     # first: "انتا" must be tried before "انت" (which cannot match
     # "انتا حمار" — "انت" is followed by "ا", not whitespace).
-    r"(انتا|انت|انته)\s+(حمار|غبي|كلب|عبيط|حيوان|وسخ)"
-    r"|يا\s*(حمار|غبي|كلب|عبيط|حيوان)"
+    # v1.6 phase 2: the noun lists were the 5 tamest words only
+    # (حمار/غبي/كلب/عبيط/حيوان), so the commonest Egyptian insults —
+    # "يا معرص", "يا شرموط", "يا وسخ", "يا خول", "يا ابن الكلب" —
+    # never reached the bank at all, and the family-attacked situation
+    # could never fire. The lists now cover the usual nouns, the
+    # "يا ابن ..." family vocatives, and bare "امك"/"ابوك".
+    # "يا ابن عمي" (friendly) is still excluded in looks_like_insult.
+    r"(انتا|انت|انته)\s+(حمار|غبي|كلب|عبيط|حيوان|وسخ|معرص|شرموط|متناك|خول|قحبه|عرص|منيك|علق)"
+    r"|يا\s*(حمار|غبي|كلب|عبيط|حيوان|وسخ|معرص|شرموط|متناك|خول|قحبه|عرص|منيك|علق)"
+    r"|يا ابن (الكلب|المتناك|المتناكه|الوسخ|الوسخه|الشرموط|الشرموطه|القحبه|دين الكلب|الحرام|المتنكه)"
+    r"|ابن (الكلب|المتناك|المتناكه|الوسخ|الوسخه|دين الكلب)"
+    r"|(ولد|ولاد) (الكلب|الوسخ|الوسخه|دين الكلب)"
+    r"|(?<!\w)(امك|ابوك|ابوكي)(?!\w)"
+    r"|(هقتلك|هضربك|هكسرك|هفضحك|هفشخك|هموتك)"
     r"|اخرس|اسكت يا"
 )
 
@@ -443,3 +455,137 @@ def looks_like_insult_turn(text: str) -> bool:
     the handler's unknown-retry search is gated on this, and
     detect_intent() routes it to just_chat before the search check."""
     return looks_like_insult(text) or extract_insult_target(text) is not None
+
+
+# --- v1.6 phase 2: insult situations -----------------------------------------
+# What the USER did to the bot (insulted pool) or why the roast target
+# deserves it (roast pool, from the roast request's extra words).
+# Deterministic keyword rules on normalised Arabic, same style as the
+# rest of this module — no LLM call on any message. Ambiguous tail ->
+# "general". The reply bank tags every served insulted/roast line with
+# `situations:` from these taxonomies; brain/reply_bank.py prefers
+# lines whose tags match the detected situation.
+INSULTED_SITUATIONS = (
+    "mocked", "called-dumb", "sworn-at", "family-attacked",
+    "threatened", "dismissed", "repeated-insult", "general",
+)
+ROAST_SITUATIONS = (
+    "arrogant", "stupid-statement", "cowardly", "annoying", "perv",
+    "general",
+)
+
+# "يا ابن عمي" (friendly) must never read as a family attack.
+_FAMILY_ATTACK_WORDS = [
+    "ابن الكلب", "ابن المتناك", "ابن المتناكه", "ابن الوسخ",
+    "ابن الوسخه", "ابن دين الكلب", "ابن الشرموط", "ابن الشرموطه",
+    "ابن القحبه", "ابن الحرام", "ابن المتنكه",
+    "امك", "ابوك", "ابوكي", "ولاد الكلب", "ولاد دين الكلب",
+    "يا ابن ال",
+]
+_THREAT_WORDS = [
+    "هقتلك", "هضربك", "هكسرك", "هفضحك", "هفشخك", "هموتك",
+    "هنيكك", "لو راجل", "هعمل فيك", "هوريك",
+]
+# Insult nouns that, repeated, mark a repeated insult ("يا حمار يا حمار").
+_REPEAT_INSULT_NOUNS = [
+    "حمار", "غبي", "كلب", "عبيط", "حيوان", "وسخ", "معرص",
+    "شرموط", "متناك", "خول", "قحبه", "عرص", "منيك",
+]
+_LAUGH_RE = re.compile(r"(ه{3,}|خ{3,}|هاها)")
+_MOCKED_WORDS = ["بتتريق", "بتسخر", "مسخره", "بتضحك", "بتضحك عليا"]
+_CALLED_DUMB_WORDS = [
+    "حمار", "غبي", "عبيط", "متخلف", "جاهل", "بهيم", "بهيمه",
+    "جاموس", "حيوان", "مبتفهمش", "مش فاهم", "بتخرف", "اهبل",
+    "هبله", "غبيه",
+]
+_SWEAR_WORDS = [
+    "معرص", "وسخ", "شرموط", "متناك", "خول", "قحبه", "كلب",
+    "عرص", "منيك", "علق",
+]
+_DISMISSED_WORDS = [
+    "انت غلط", "كلامك غلط", "مش صحيح", "انت مش فاهم",
+    "انت ولا حاجه", "ولا حاجه", "فاشل", "تافه", "ملكش لازمه",
+    "انت مين", "مين انت", "اخرس", "اسكت",
+]
+
+
+def _repeated_insult(t: str) -> bool:
+    """Same insult noun twice ("يا حمار يا حمار"), or "تاني"/"برضه"
+    on top of an insult — the user is at it again, not starting."""
+    words = t.split()
+    for w in _REPEAT_INSULT_NOUNS:
+        if words.count(normalize_arabic(w)) >= 2:
+            return True
+    return _has(t, ["تاني", "برضه", "برده"]) and looks_like_insult(t)
+
+
+def detect_insult_situation(text: str) -> str:
+    """Situation of an insult aimed at the bot, from the incoming
+    message alone. Priority is specificity: a family attack outranks
+    a generic swear, a threat outranks a taunt, laughter marks mockery
+    even when an insult noun is present too. Returns "general" when
+    nothing specific matches."""
+    t = normalize_arabic(text or "")
+    if "يا ابن عمي" in t:
+        return "general"
+    if _has(t, _FAMILY_ATTACK_WORDS):
+        return "family-attacked"
+    if _has(t, _THREAT_WORDS):
+        return "threatened"
+    if _repeated_insult(t):
+        return "repeated-insult"
+    if _LAUGH_RE.search(t) or _has(t, _MOCKED_WORDS):
+        return "mocked"
+    if _has(t, _CALLED_DUMB_WORDS):
+        return "called-dumb"
+    if _has(t, _SWEAR_WORDS):
+        return "sworn-at"
+    if _has(t, _DISMISSED_WORDS):
+        return "dismissed"
+    return "general"
+
+
+# Roast situations come from the extra words AFTER "اشتم X" — a bare
+# "اشتم X" carries no situation and is "general".
+_ROAST_ARROGANT_WORDS = [
+    "بيتباهي", "بيتفاخر", "مغرور", "بيتنطط", "بيتكبر", "متكبر",
+    "شايف نفسه", "فاكر نفسه", "بيتفشخر", "غرور", "عايش الدور",
+]
+_ROAST_STUPID_WORDS = [
+    "غبي", "حمار", "عبيط", "متخلف", "جاهل", "بيهبد", "هبد",
+    "بيخرف", "اهبل", "هبله", "بيقول كلام غبي", "كلامه غبي",
+    "مبيفهمش", "مش فاهم حاجه",
+]
+_ROAST_COWARDLY_WORDS = [
+    "جبان", "خايف", "بيهرب", "بيخاف", "بيستخبي", "جبن",
+]
+_ROAST_ANNOYING_WORDS = [
+    "مزعج", "بيزعج", "بيزن", "رغاي", "بيتكلم كتير", "ممل",
+    "بيكرر", "بيعيد", "صدعنا", "زهقنا", "بيضايق", "بيضايقنا",
+    "رخم",
+]
+_ROAST_PERV_WORDS = [
+    "شرموط", "قحبه", "منحرف", "بيتحرش", "سافل", "متناك",
+    "عرص", "بيشتهي", "بيبعبص", "داعر", "عاهر",
+]
+
+
+def detect_roast_situation(text: str) -> str:
+    """Situation of a roast request, from the words after "اشتم X".
+    The target name itself is stripped first, so "اشتم محمد" is
+    "general" while "اشتم محمد عشان بيتباهى" is "arrogant"."""
+    t = normalize_arabic(text or "")
+    rest = _TARGET_RE.sub(" ", t)
+    rest = re.sub(r"(?<!\w)اشتمي?(?!\w)", " ", rest)
+    rest = re.sub(r"(?<!\w)بهجت(?!\w)", " ", rest)
+    if _has(rest, _ROAST_ARROGANT_WORDS):
+        return "arrogant"
+    if _has(rest, _ROAST_STUPID_WORDS):
+        return "stupid-statement"
+    if _has(rest, _ROAST_COWARDLY_WORDS):
+        return "cowardly"
+    if _has(rest, _ROAST_ANNOYING_WORDS):
+        return "annoying"
+    if _has(rest, _ROAST_PERV_WORDS):
+        return "perv"
+    return "general"
