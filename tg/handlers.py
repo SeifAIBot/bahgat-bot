@@ -1139,7 +1139,11 @@ async def _resolve_insult_level(context, chat_id, text, sender_insulted_bot, rec
             if getattr(member, "status", None) in ("member", "administrator", "creator"):
                 level = "personal_only"
         except Exception:
-            level = "full"
+            # v1.2 fail-safe: a target whose membership cannot be checked
+            # is treated as a member (person-only). A resolved non-member
+            # returns status "left"/"kicked", not an exception, so this
+            # only fires on genuine errors / unresolvable ids.
+            level = "personal_only"
         _membership_cache[key] = (level, time.time() + _MEMBERSHIP_TTL)
         return level, target_name
     if target_name:
@@ -1155,8 +1159,13 @@ async def _resolve_insult_level(context, chat_id, text, sender_insulted_bot, rec
         except Exception:
             pass
         return "full", target_name
-    # No resolvable target.
-    return ("personal_only" if sender_insulted_bot else "full"), None
+    # No resolvable target at all ("اشتمه" with no referent, a bare
+    # insult with no name): ambiguous — fail safe to person-only.
+    # v1.2 changed this from "full" (the old fallback). The named-but-
+    # unresolvable path above still returns "full": a named person found
+    # nowhere among the members is the resolver's non-member answer
+    # (e.g. "اشتم السيسي"), not an ambiguous case.
+    return "personal_only", None
 
 
 def _recent_speakers(chat_id: int):
@@ -1954,10 +1963,35 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             and getattr(context.bot, "username", None)
             and _rtu.username == context.bot.username
         )
+        # v1.2 roast target (cache-only, no network call — the fast path
+        # stays instant): "اشتم X" resolves its target from the reply /
+        # mentions / recent speakers, and membership from the cache the
+        # LLM path already filled. Uncached/unresolved fails safe to
+        # member-safe lines (target_is_member=None). The owner is never
+        # a roast target (id match or do_not_roast state, same as
+        # _resolve_insult_level below).
+        _roast_member = None
+        _roast_owner = False
+        if _extract_insult_target(text):
+            _mentions = [(m.group(1), None) for m in re.finditer(r"@(\w+)", text)]
+            _tid, _tname, _tsrc = resolve_insult_target(
+                text, reply_to_user=_rtu, mentions=_mentions,
+                recent_speakers=_recent_speakers(chat_id),
+            )
+            if _tid is not None and int(_tid) == int(settings.owner_id):
+                _roast_owner = True
+            elif _tname and _get_state(f"do_not_roast:{_normalize(_tname)}"):
+                _roast_owner = True
+            elif _tid is not None:
+                _cached = _membership_cache.get((chat_id, int(_tid)))
+                if _cached and time.time() < _cached[1]:
+                    _roast_member = _cached[0] == "personal_only"
         bank = match_reply_bank(
             text, chat_id=chat_id,
             is_owner=is_owner(user.id, settings.owner_id),
             is_reply_to_bot=_reply_to_bot,
+            target_is_member=_roast_member,
+            target_is_owner=_roast_owner,
         )
         if bank is not None:
             member_early["username"] = user.username or ""

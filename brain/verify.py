@@ -1,9 +1,15 @@
 """Post-generation checks — code, not prompt. Runs before sending.
 - Egyptian dialect check: reply must not contain Fusha markers.
 - Banned AI phrases check.
-- Family-insult enforcement: if target is a group member, reply must not
-  contain family words. If it does, the offending sentences are SILENTLY
+- Family-insult enforcement (TARGET-AWARE, v1.2): the handler resolves
+  the insult target first (tg/handlers.py _resolve_insult_level) and
+  passes insult_level="personal_only" when the target is a member or
+  unresolved/ambiguous, "full" only for a resolved non-member. Here,
+  personal_only + family words means the offending sentences are SILENTLY
   dropped (never narrate the rule, never name the owner mid-roast).
+  Family detection lives in core/rules.py (contains_family_insult) and
+  covers امك/ابوك/… AND the vocative shapes ("يا ابن الكلب",
+  "يا ولاد الكلب", "أم إلهك زانية") — the old word list missed those.
 - Leakage filter: the reply must never contain the owner id, prompt
   internals, or key/token-like strings.
 - Length: Telegram cap 4096 chars, split on sentence boundaries.
@@ -11,10 +17,15 @@
 import re
 
 try:
-    from core.rules import FAMILY_WORDS, normalize_arabic as _core_normalize
+    from core.rules import (
+        FAMILY_WORDS,
+        contains_family_insult as _rules_contains_family,
+        normalize_arabic as _core_normalize,
+    )
 except ImportError:  # core/rules.py has no normalize_arabic yet (v0.4).
     from core.rules import FAMILY_WORDS
     _core_normalize = None
+    _rules_contains_family = None
 
 _DIACRITICS = re.compile(r"[\u064b-\u0652\u0670]")
 
@@ -49,8 +60,14 @@ _DEFLECTION = "يا عم الكلام ده مش هقوله، قول حاجة ت�
 
 
 def contains_family(text: str) -> bool:
-    """Normalised + word-boundary aware, so hamza variants match and
-    innocent words containing a family word as a substring do not."""
+    """Canonical family-insult check (core/rules.py): possessive family
+    words AND the vocative shapes ("يا ابن الكلب", "يا ولاد الكلب",
+    "أم إلهك زانية"). Word-boundary aware, so innocent words containing
+    a family word as a substring ("امكانيات", "ابن خلدون", "يا ابن عمي",
+    "أم كلثوم") do not match. Falls back to the bare word list if the
+    canonical check is unavailable (old core/rules.py)."""
+    if _rules_contains_family is not None:
+        return bool(_rules_contains_family(text))
     t = normalize_arabic(text or "")
     for w in FAMILY_WORDS:
         nw = normalize_arabic(w).strip()

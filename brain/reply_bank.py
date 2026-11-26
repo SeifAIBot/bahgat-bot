@@ -1,21 +1,33 @@
-"""Bahgat reply bank — v1.1 retrieval fast-path.
+"""Bahgat reply bank — v1.2 retrieval fast-path (177 entries).
 
 Bahgat's REAL lines (persona/bahgat/reply_bank.yaml, built from his own
 transcripts — never invented) served verbatim for the highest-frequency
-persona moments: insult comebacks, jokes, his Sisi/takfir stance,
-challenges, greetings. Checked BEFORE the LLM (like detect_fast_reply):
-instant, zero quota, zero tokens — and the only method that guarantees
-a real lazma lands verbatim (see docs/research-persona-methods.md §1,
-method #1, ranked highest impact).
+persona moments: insult comebacks, roasts on request, jokes, his
+Sisi/takfir stance, challenges, condolences, greetings. Checked BEFORE
+the LLM (like detect_fast_reply): instant, zero quota, zero tokens —
+and the only method that guarantees a real lazma lands verbatim (see
+docs/research-persona-methods.md §1, method #1, ranked highest impact).
 
 Rules, enforced here in code (never left to the prompt):
 - Only verbatim/cleaned lines are served. "approximate" lines (uncertain
   speaker attribution in the transcripts) are loaded but never served.
-- op-05 ("مش عارف، أنا مش عارف صراحة") is never served: its own bank
-  note says prefer searching over the hedge.
-- The owner is NEVER served an insult/challenge/dismiss line — the
-  agreed rule (owner never insulted) is enforced by the is_owner gate,
-  not by the model remembering it.
+- op-05 / op-30 ("مش عارف" hedges) are never served: their own bank
+  notes say prefer searching over the hedge.
+- MEMBER SAFETY (v1.2, Seif 2026-11-26): bank lines carrying a
+  father/mother/family insult are tagged `member_safe: false` in the YAML
+  and are served ONLY when the insult target is a RESOLVED non-member.
+  Member-directed insults stay person-only. Enforcement:
+  - insulted comebacks: the target is always the sender (a member) —
+    member-safe lines only, always.
+  - roast ("اشتم X"): family-insult lines only when target_is_member
+    is False (resolved non-member). Unresolved (None) fails safe to
+    member-safe lines. Never at the owner (target_is_owner).
+  - opinion lines are ABOUT السيسي/التكفير (non-member subjects), so
+    their pool is not member-restricted — the line's target is never a
+    group member. Every other category picks member-safe only.
+- The owner is NEVER served an insult/challenge/dismiss/roast line — the
+  agreed rule (owner never insulted) is enforced by the is_owner /
+  target_is_owner gates, not by the model remembering it.
 - Insult comebacks fire only when the insult targets the bot: the
   message mentions "بهجت" or is a reply to the bot's message. A member
   insulting another member is not the bot being insulted.
@@ -33,7 +45,12 @@ import os
 import random
 import re
 
-from brain.intent import looks_like_insult, looks_like_opinion_ask, normalize_arabic
+from brain.intent import (
+    extract_insult_target,
+    looks_like_insult,
+    looks_like_opinion_ask,
+    normalize_arabic,
+)
 
 try:
     import yaml
@@ -43,9 +60,9 @@ except ImportError:  # pragma: no cover - PyYAML is installed; defensive only.
 _BANK_PATH = os.path.join(
     os.path.dirname(__file__), "..", "persona", "bahgat", "reply_bank.yaml"
 )
-# Lines never served even though they are in the file: the hedge (its own
-# note says prefer searching) and anything with uncertain attribution.
-_BLOCKED_IDS = {"op-05"}
+# Lines never served even though they are in the file: the hedges (their own
+# notes say prefer searching) and anything with uncertain attribution.
+_BLOCKED_IDS = {"op-05", "op-30"}
 _BLOCKED_CONFIDENCE = {"approximate"}
 
 # Trigger words (normalised form; matching normalises both sides, same
@@ -60,6 +77,11 @@ _JOKE_WORDS = ["نكته", "اضحكني"]
 _OPINION_TOPICS = ["السيسي", "تكفير", "التكفير", "كافر", "الكافر", "الاخوان"]
 _CHALLENGE_WORDS = [
     "انت غلط", "كلامك غلط", "مش صحيح", "بتخرف", "انت مش فاهم",
+]
+# Death / condolence words. Word-boundary matching, so "ماتش" (match)
+# never fires the condolence line.
+_CONDOLENCE_WORDS = [
+    "مات", "توفي", "اتوفي", "توفت", "البقاء لله", "عزاء", "الله يرحم",
 ]
 
 _bank_cache = None
@@ -113,10 +135,15 @@ def reload_bank() -> None:
     _last_used.clear()
 
 
-def _pick(category: str, chat_id: int) -> str | None:
+def _pick(category: str, chat_id: int, member_safe_only: bool = True) -> str | None:
     """Random line from a category, excluding the last 5 served from it
-    in this chat (rotation so the same comeback does not repeat)."""
+    in this chat (rotation so the same comeback does not repeat).
+    member_safe_only=True (default) excludes lines tagged
+    `member_safe: false` — family-insult lines, served only when the
+    caller has established a resolved non-member target."""
     entries = load_bank().get(category) or []
+    if member_safe_only:
+        entries = [e for e in entries if e.get("member_safe", True) is not False]
     if not entries:
         return None
     key = (chat_id, category)
@@ -137,21 +164,42 @@ def match_reply_bank(
     chat_id: int,
     is_owner: bool = False,
     is_reply_to_bot: bool = False,
+    target_is_member: bool | None = None,
+    target_is_owner: bool = False,
 ) -> str | None:
     """Return a verbatim Bahgat line for this message, or None.
 
-    Priority: insulted > joke > opinion > challenge > greeting — a
-    message carrying two signals ("اهلا يا بهجت انت حمار") must get
-    the comeback, not the greeting."""
+    Priority: insulted > roast > joke > opinion > condolence >
+    challenge > greeting — a message carrying two signals
+    ("اهلا يا بهجت انت حمار") must get the comeback, not the greeting.
+
+    target_is_member / target_is_owner describe the ROAST target
+    ("اشتم X"), resolved by the caller from the membership cache only
+    (no network call — the fast path stays instant). None means
+    unresolved and fails safe to member-safe lines."""
     t = normalize_arabic(text or "")
     words = t.split()
     targeted = "بهجت" in words or is_reply_to_bot
 
-    # Insulted: the bot is the target, and never the owner.
+    # Insulted: the bot is the target, and never the owner. The target
+    # is the sender — always a member — so member-safe lines only.
     if not is_owner and targeted and looks_like_insult(text):
         line = _pick("insulted", chat_id)
         if line is not None:
             return line
+
+    # Roast request ("اشتم X"): serve a roast line. Never at the owner,
+    # never at the bot itself ("اشتم بهجت" goes to the LLM instead).
+    # Family-insult lines only for a RESOLVED non-member target.
+    roast_target = extract_insult_target(text)
+    if roast_target and not target_is_owner:
+        if normalize_arabic(roast_target) != "بهجت":
+            line = _pick(
+                "roast", chat_id,
+                member_safe_only=(target_is_member is not False),
+            )
+            if line is not None:
+                return line
 
     # Joke request ("قول نكته" / "قولي نكته" / "هات نكته").
     if _has(t, _JOKE_WORDS):
@@ -160,8 +208,16 @@ def match_reply_bank(
             return line
 
     # Opinion: only Bahgat's own Sisi/takfir stance, only on that topic.
+    # The lines are ABOUT a non-member subject, never about a group
+    # member, so the pool is not member-restricted.
     if looks_like_opinion_ask(text) and _has(t, _OPINION_TOPICS):
-        line = _pick("opinion_asked", chat_id)
+        line = _pick("opinion_asked", chat_id, member_safe_only=False)
+        if line is not None:
+            return line
+
+    # Condolence: someone died ("مات", "توفي", "البقاء لله" ...).
+    if _has(t, _CONDOLENCE_WORDS):
+        line = _pick("condolence", chat_id)
         if line is not None:
             return line
 

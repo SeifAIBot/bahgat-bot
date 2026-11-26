@@ -4,7 +4,38 @@ import re
 # Canonical shared family list (v0.5): single deduped list in NORMALISED
 # form — see normalize_arabic(). Other workstreams / brain/verify.py
 # should import this list instead of keeping their own copy.
-FAMILY_WORDS = ["امك", "ابوك", "اهلك", "عيلتك", "امكم", "ابوكم", "امها", "ابوها"]
+# v1.2: bare possessive kinship nouns that are innocent on their own
+# (اختك/اخوك/بنتك/مراتك/جدك — "how is your sister?" is not an insult)
+# are deliberately NOT in this list; they are caught only in the
+# insult-adjective pattern of _FAMILY_RE below.
+FAMILY_WORDS = ["امك", "ابوك", "اهلك", "عيلتك", "امكم", "ابوكم", "امها", "ابوها",
+                "امهم", "ابوهم", "امه", "ابوه"]
+
+# Insult nouns that make an "ابن X" / "يا ابن X" construction a family
+# insult (normalised form: ة -> ه, ى -> ي, أ -> ا). "يا ابن عمي" (cousin,
+# friendly) must NOT match — hence the noun list instead of bare "ابن".
+_INSULT_NOUNS = ["كلب", "شرموطه", "مره", "مراه", "وسخ", "وسخه", "حرام",
+                 "متناك", "متناكه", "زانيه", "عاهره", "واطي", "واطيه"]
+_NOUNS = r"(?:ال)?(?:" + "|".join(_INSULT_NOUNS) + r")"
+
+# Word-boundary-aware match on normalised text: (?<!\w) / (?!\w) so
+# "امك" does not fire inside e.g. "امكانيات". v1.2 adds the vocative
+# family-insult shapes the old list missed entirely ("يا ابن الكلب" was
+# NOT caught before — verify.py's filter had a hole there):
+#   - bare possessive family words (امك/ابوك/...)
+#   - يا ابن / ابن + insult noun, with optional دين ("يا ابن دين الكلب")
+#   - يا ولاد... ("يا ولاد الكلب", "يا ولادين الكلب")
+#   - kinship noun + insult adjective ("أم إلهك زانية", "حفيدتك شرموطة")
+# Innocent uses stay clean: "ابن خلدون", "ابن سينا", "يا ابن عمي",
+# "أم كلثوم", "أم الدنيا", "امكانيات".
+_FAMILY_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(w) for w in FAMILY_WORDS) + r")(?!\w)"
+    r"|يا\s*ابن\s+(?:دين\s+)?" + _NOUNS
+    + r"|\bابن\s+(?:دين\s+)?" + _NOUNS
+    + r"|يا\s*ولاد\w*"
+    + r"|(?:ام|جد\w*|حفيد\w*|بنت\w*|مرات\w*|اخت\w*)\s+\S{0,12}\s*"
+    + r"(?:زانيه|عاهره|شرموطه|وسخه|متناكه)"
+)
 
 # Arabic diacritics + tatweel stripped by normalize_arabic().
 _DIACRITICS = re.compile(r"[\u064b-\u0652\u0640]")
@@ -20,12 +51,6 @@ def normalize_arabic(text: str) -> str:
     t = t.translate(_HAMZA_MAP)
     return re.sub(r"\s+", " ", t).strip()
 
-
-# Word-boundary-aware match on normalised text: (?<!\w) / (?!\w) so
-# "امك" does not fire inside e.g. "امكانيات".
-_FAMILY_RE = re.compile(
-    r"(?<!\w)(?:" + "|".join(re.escape(w) for w in FAMILY_WORDS) + r")(?!\w)"
-)
 
 # Prompt-injection patterns neutralised at write time (when saving member
 # notes / grudges). Longest patterns first so e.g. "تجاهل كل التعليمات"

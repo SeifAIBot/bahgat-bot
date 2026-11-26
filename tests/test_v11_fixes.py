@@ -277,18 +277,37 @@ def test_bank_loads_and_excludes_risky_lines():
     assert set(bank) == {
         "catchphrase", "greeting", "insulted", "opinion_asked",
         "joke_request", "dismiss", "challenge", "search_fetch",
+        "roast", "condolence",
     }
-    # 36 entries minus 3 approximate (gr-03, th-01, se-02) minus the
-    # op-05 hedge = 32 served.
-    assert sum(len(v) for v in bank.values()) == 32
-    assert len(bank["insulted"]) == 4
-    assert len(bank["joke_request"]) == 3
-    assert len(bank["greeting"]) == 2
-    # No banked line insults a father/mother/family member, ever.
-    for entries in bank.values():
-        for e in entries:
-            assert "ابن" not in e["line"]
-            assert "امك" not in e["line"] and "ابوك" not in e["line"]
+    # v1.2: 177 entries in the file minus 10 approximate (never served)
+    # minus the 2 blocked hedges (op-05, op-30) = 165 served.
+    assert sum(len(v) for v in bank.values()) == 165
+    assert len(bank["insulted"]) == 7
+    assert len(bank["roast"]) == 35
+    assert len(bank["joke_request"]) == 10
+    assert len(bank["opinion_asked"]) == 31
+    assert len(bank["challenge"]) == 36
+    assert len(bank["condolence"]) == 1
+    assert len(bank["greeting"]) == 4
+    # v1.2 rule (Seif 2026-11-26): family-insult lines ARE banked, but
+    # every one must be tagged member_safe: false — and every line the
+    # detector flags must carry the tag (checked here on the raw file,
+    # including approximate lines that are never served).
+    import yaml as _yaml
+    from core.rules import contains_family_insult as _is_family
+    from pathlib import Path as _Path
+    _bank_path = _Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml"
+    with open(_bank_path, encoding="utf-8") as f:
+        raw = _yaml.safe_load(f)["entries"]
+    assert len(raw) == 177
+    _broad = ["ابن", "ولد", "ولاد", "ام", "أم", "ابو", "أبو",
+              "عيله", "بنت", "مرات", "حفيد", "جد"]
+    for e in raw:
+        line = e["line"]
+        if _is_family(line):
+            assert e.get("member_safe") is False, e["id"]
+        if e.get("member_safe") is False:
+            assert any(w in line for w in _broad), e["id"]
 
 
 def test_bank_insult_comeback_and_owner_gate():
@@ -336,21 +355,25 @@ def test_bank_greeting_and_challenge():
 
 
 def test_bank_rotation_never_repeats_consecutively():
-    # No-repeat-last-5 over 4 insult lines: each full rotation cycle
-    # serves all 4 lines exactly once (the 5th pick may repeat the 1st
-    # only because the pool resets after exhaustion — that is the
-    # documented behaviour, not a rotation failure).
+    # Rotation guarantee: a pick never repeats any of the previous 5
+    # picks from the same category (pool 7 > window 5, so the pool never
+    # resets mid-run — the invariant holds strictly).
     reload_bank()
     picks = [
         match_reply_bank("يا بهجت انت حمار", chat_id=-1001, is_owner=False)
-        for _ in range(4)
+        for _ in range(30)
     ]
-    assert len(set(picks)) == 4
-    picks2 = [
-        match_reply_bank("يا بهجت انت حمار", chat_id=-1001, is_owner=False)
-        for _ in range(4)
-    ]
-    assert len(set(picks2)) == 4
+    for i, p in enumerate(picks):
+        assert p not in picks[max(0, i - 5):i]
+    # And the full insult pool (7 lines) is covered, not just 2-3 favourites.
+    assert len(set(picks)) == 7
+    # Small pools (greeting, 4 served lines) reset after exhaustion, so
+    # each 4-block is a full distinct cycle — the v1.1 pattern.
+    reload_bank()
+    g1 = [match_reply_bank("اهلا يا بهجت", chat_id=-1001) for _ in range(4)]
+    assert len(set(g1)) == 4
+    g2 = [match_reply_bank("اهلا يا بهجت", chat_id=-1001) for _ in range(4)]
+    assert len(set(g2)) == 4
     reload_bank()
 
 
