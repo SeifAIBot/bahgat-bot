@@ -115,7 +115,10 @@ def test_gemini_skipped_when_daily_requests_at_cap(tmp_path):
                  (provider TEXT, model TEXT DEFAULT '', date TEXT, requests INTEGER DEFAULT 0,
                   tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0,
                   exhausted_until REAL, PRIMARY KEY(provider, model, date))""")
-    today = time.strftime("%Y-%m-%d", time.gmtime())
+    # Gemini usage is keyed by PACIFIC date (router._date_for) — seeding
+    # by UTC breaks this test during 00:00-08:00 UTC, when the two dates
+    # differ (it passed at 23:44 UTC and failed at 00:18 UTC, same night).
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 8 * 3600))
     for provider, model, reqs in [
             ("gemini-3.5-flash-lite", "gemini-3.5-flash-lite", 500),
             ("gemini-3.1-flash-lite", "gemini-3.1-flash-lite", 500),

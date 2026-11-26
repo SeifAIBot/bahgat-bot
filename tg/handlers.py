@@ -955,6 +955,44 @@ async def _fetch_many(urls):
     return out
 
 
+# v0.7e: a bare follow-up ("ايه الحصل") carries no topic on its own —
+# searching it literally once returned song lyrics instead of the actual
+# topic (the Waraq incident from two turns earlier). Short follow-ups
+# inherit the most recent substantive user turn from history so the
+# DuckDuckGo query keeps the topic.
+_FOLLOWUP_MAX_WORDS = 4
+
+
+def _history_user_text(item: dict) -> str:
+    """Plain user text out of a formatted history item ("[Name]: text")."""
+    content = (item or {}).get("content", "") or ""
+    if (item or {}).get("role") != "user":
+        return ""
+    if "]:" in content:
+        return content.split("]:", 1)[1].strip()
+    return content.strip()
+
+
+def _search_query(text: str, history: list[dict]) -> str:
+    """Build the web-search query for a search intent.
+
+    Self-contained messages search as-is. A short follow-up (<= 4 words)
+    is prefixed with the most recent substantive user turn from history
+    (a turn with > 4 words — greetings, jokes and insults are short by
+    nature and never qualify), so "ايه الحصل" after "عايز اعرف ايه الحصل
+    في حادثة الوراق المهاردة" becomes a query about the Waraq incident
+    instead of a literal search for the phrase.
+    """
+    t = (text or "").strip()
+    if len(t.split()) > _FOLLOWUP_MAX_WORDS:
+        return t
+    for item in reversed(history or []):
+        topic = _history_user_text(item)
+        if len(topic.split()) > _FOLLOWUP_MAX_WORDS:
+            return f"{topic} {t}"
+    return t
+
+
 async def _search_grounding(query: str) -> str:
     """Numbered passages, best 2 with text>200 chars; '[SEARCH FAILED]' if none."""
     try:
@@ -1562,7 +1600,9 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         search_ran = False
         if intent == "search":
             # Search runs BEFORE the first LLM call for search intents.
-            search_text = await _search_grounding(text)
+            # v0.7e: the query inherits the conversation topic for short
+            # follow-ups ("ايه الحصل" -> "...حادثة الوراق ايه الحصل").
+            search_text = await _search_grounding(_search_query(text, history))
             search_ran = bool(search_text) and not search_text.startswith("[SEARCH FAILED]")
 
         system = _build_system_prompt(member, member["mood"], search_text, insult_level, target_name)
@@ -1587,7 +1627,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         # unknown, deflect directly — no wasted second call. Counters
         # (unknown_retries / unknown_retries_rescued) feed /stats.
         if looks_unknown(reply) and not search_ran and intent != "search":
-            search_text2 = await _search_grounding(text)
+            search_text2 = await _search_grounding(_search_query(text, history))
             if search_text2 and not search_text2.startswith("[SEARCH FAILED]"):
                 system2 = _build_system_prompt(member, member["mood"], search_text2, insult_level, target_name)
                 messages2 = (

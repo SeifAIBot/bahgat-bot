@@ -1,4 +1,40 @@
 # Changelog
+## 2026-11-26 — v0.7e Cloady deploy + search follow-up fix (deploy target: Cloady, no card)
+- **Deploy moved Render → Cloady.** Render's "Add Card" modal blocked the
+  free deploy on Seif's brand-new account (account-level anti-fraud check;
+  Render's docs say no card, but the check fires anyway and no config
+  bypasses it). Cloady free workspace (0.5 vCPU / 1 GB RAM / 5 GB SSD,
+  Germany EU1, no card, no expiry) now hosts the bot; deploy went LIVE
+  2026-11-26 02:03 EET and the bot replied in the test group 02:10 EET.
+- `docker-compose.yml`: bind mount `./data:/app/data` rejected by Cloady
+  ("volumes must mount a declared named volume") — now a declared named
+  volume `bahgat-data:/app/data` (also the persistence layer: memory
+  survives redeploys, unlike Render free). `env_file: .env` dropped (the
+  platform injects env vars; a missing .env would fail the parse),
+  `cpus: 1.0` → `0.5` to stay inside the free tier. `ALLOWED_CHAT_IDS`
+  deliberately left unset in Cloady per Seif's call — the bot answers in
+  any group it is added to.
+- **Search follow-up fix (`tg/handlers.py`, `_search_query`).** Live bug:
+  Seif asked about the Waraq incident, then "ايه الحصل" — the bot
+  searched the literal follow-up and answered with song lyrics about
+  "عمره ما غنى ولا عرف الهوى". Short follow-ups (<= 4 words) now inherit
+  the most recent substantive user turn from history, so the query keeps
+  the topic. Both search call sites (search intent + unknown-retry loop)
+  use it. Tests: `tests/test_search_followup_v07e.py` (5 tests).
+- **Intent keywords (`brain/intent.py`).** Two more live misses from the
+  same session: "ايه الحصل" (without اللي) did not match `_SEARCH_WORDS`
+  (only "ايه اللي حصل" was there), so follow-ups fell to just_chat and
+  only got searched via the unknown loop; "عايز اغنيه" did not match
+  `_YOUTUBE_WORDS`, so a song request never offered the video/audio
+  choice. Added "ايه الحصل"/"ايه حصل" to search words and
+  "عايز اغنيه"/"عاوز اغنيه"/"عايز فيديو"/"عاوز فيديو" to YouTube words.
+  Tests in `tests/test_intent.py`.
+- Test fix: `test_gemini_skipped_when_daily_requests_at_cap` seeded usage
+  by UTC date while the router keys Gemini by Pacific date — it passed at
+  23:44 UTC and failed at 00:18 UTC the same night. Now seeds by Pacific
+  date, like the router.
+- 268 tests pass (263 + 5 new), py_compile + ruff clean.
+
 ## 2026-11-25 — v0.7d Render free web service conversion (deploy target: Render, no card)
 - `render.yaml` converted from Background Worker to **free Web Service**:
   `type: web`, `plan: free`, `numInstances: 1`, `env: docker` (Dockerfile
