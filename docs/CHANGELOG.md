@@ -46,11 +46,16 @@ frames):**
   bare artist name is non-media → just_chat. Now a short bare
   artist name (≤3 words, no question, no non-media noun) after
   "هات"/"هاتلي" goes to YouTube; "هات ملخص" still falls through.
-- Bug 5 — opinion challenge restated the theory: no stance
-  instruction in the prompt, no opinion example, no opinion
-  handling. Now `looks_like_opinion_ask()` + a stance line in
-  SYSTEM_BASE + an 8th few-shot pair + a user-role stance note in
-  the handler; PROMPT_VERSION 6.3.
+- Hardening, NOT a live bug (video worker's correction) —
+  opinion challenge: the brief's "restated the theory" quote was
+  the SEARCH answer's opening, mixed up with the opinion reply.
+  The actual opinion reply (6:06 PM) was sharp and in-character:
+  "رأيك في إيه يا غبي؟ النظرية دي مؤامرات فارغة، وأنت لسه فاكرها
+  حقيقة؟ روح ركز في حياتك بدل ما تضيع". The prompt had NO stance
+  instruction, so that sharpness was luck, not a guarantee — the
+  machinery below makes it reliable: `looks_like_opinion_ask()` +
+  a stance line in SYSTEM_BASE + an 8th few-shot pair + a
+  user-role stance note in the handler; PROMPT_VERSION 6.3.
 - Bug 6 — "قول نكته" (6:09 PM) and "قول اهلا في فويس نوت"
   (6:10 PM) never produced a voice note. THREE holes: (a)
   `_try_send_voice` had a single synthesis attempt — any failure
@@ -69,16 +74,24 @@ frames):**
   text fallback carries "الصوت مش راضي يطلع دلوقتي" (failed) or
   "الصوت استنى شوية" (cooldown), short replies only.
 - Correction — the pick-list "duplicate": the frames show NO
-  duplicate. "النظام" (3:40) and "EL 3NWAN" (2:58) are different
-  songs; the apparent double was EL 3NWAN at different positions
-  in two separate renderings of the الخلاصه list (6:07 vs 6:08
-  PM). The video-id dedupe in `search_query()` stays as a
-  defensive fix (ytsearch can return true duplicates), tested,
-  but it is not a confirmed live bug.
-- Observation, no fix — the 6:10 PM text joke ended with a mild
-  dig at the owner by name ("دمك تقيل يا سيف"). The bank's joke
-  lines name nobody, so the bank path avoids this instance; the
-  LLM path still relies on the prompt's owner rule.
+  EL 3NWAN double. "النظام" (3:40) and "EL 3NWAN" (2:58) are
+  different songs; the apparent double was EL 3NWAN at different
+  positions in two separate renderings of the الخلاصه list (6:07
+  vs 6:08 PM). The REAL duplicate was in the فرعون list: the same
+  song twice under different uploads ("Marwan Moussa - Fr3on
+  (Official Audio)" vs "MARWAN MOUSSA - FR3ON | ...", both 3:47)
+  — video ids cannot catch that, so `search_query()` now also
+  drops a later entry when its title tokens are a subset of an
+  earlier entry's (or vice versa) with equal duration (≥3-token
+  floor; video-id dedupe stays as the first pass).
+- Observation, no fix — the LLM path is mildly rude to the owner
+  by name in heated exchanges: the 6:06 PM opinion reply opened
+  "رأيك في إيه يا غبي؟" and the 6:10 PM text joke ended "دمك
+  تقيل يا سيف". The owner-never-insulted rule as implemented
+  covers targeted insults and bank lines (the bank never serves
+  the owner an insult/challenge line); spontaneous mild rudeness
+  toward the owner in an LLM exchange is not blocked. Seif asked
+  for a disrespectful bot, so this is his call, not a fix.
 
 **Persona (Part B):** research in docs/research-persona-methods.md
 (27 sources; ranked: reply bank first, Style RAG second, structured
@@ -110,9 +123,9 @@ download error hints), `persona/bahgat/examples.md` (8th pair),
 `docs/research-persona-methods.md` (new),
 `docs/YOUTUBE_COOKIES.md` (new), `.env.example`
 (`YT_COOKIES_FILE`), `.gitignore` (cookies files),
-`tests/test_v11_fixes.py` (new, 26 tests).
+`tests/test_v11_fixes.py` (new, 27 tests).
 
-**Tests:** 341 passed (315 baseline + 26 new), py_compile + ruff
+**Tests:** 342 passed (315 baseline + 27 new), py_compile + ruff
 clean, secret audit clean, no training data staged. Commit local
 only — NOT pushed (no token in context).
 

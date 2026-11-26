@@ -15,7 +15,7 @@ Security (v0.5, Workstream A):
 - If yt-dlp is not installed, resolve_query/download fail cleanly with
   RuntimeError (callers show an in-character failure) — never fake results.
 """
-import json, subprocess, os, uuid, logging
+import json, re, subprocess, os, uuid, logging
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -167,17 +167,62 @@ def search_query(query: str, limit: int = 5) -> list[dict]:
             "duration": duration,
             "thumbnail": thumb,
         })
-    # v1.1: ytsearch can return the same video twice (live: EL 3NWAN
-    # appeared as pick 3 and pick 5) — dedupe by video id, keep the
-    # first occurrence, preserve order.
-    seen = set()
-    deduped = []
+    # v1.1: ytsearch can return the same video twice — dedupe by video
+    # id first. The live فرعون list (18:05 test) also had the SAME song
+    # twice under different uploads/titles ("Marwan Moussa - Fr3on
+    # (Official Audio)" vs "MARWAN MOUSSA - FR3ON | ...", both 3:47),
+    # which video ids cannot catch — so a second pass drops a later
+    # entry when its title tokens are a subset of an earlier entry's
+    # (or vice versa) AND the durations are equal. The >=3-token floor
+    # on the smaller set keeps short titles ("فرعون" alone) from
+    # collapsing different songs. First occurrence wins, order kept.
+    # (Correction: the brief's "EL 3NWAN twice" was a misread — in the
+    # الخلاصه list #3 is النظام (3:40) and #5 is EL 3NWAN (2:58),
+    # different songs; the real duplicate was the فرعون pair.)
+    seen_ids = set()
+    kept = []
     for item in out:
-        if item["video_id"] in seen:
+        if item["video_id"] in seen_ids:
             continue
-        seen.add(item["video_id"])
-        deduped.append(item)
-    return deduped
+        seen_ids.add(item["video_id"])
+        if _is_title_dupe(item, kept):
+            continue
+        kept.append(item)
+    return kept
+
+
+_MIN_TITLE_TOKENS = 3
+
+
+def _title_tokens(title: str) -> set[str]:
+    """Normalised title tokens for near-dupe detection: lowercased,
+    tashkeel/tatweel stripped, alef forms unified, ى→ي, ة→ه, split
+    on anything that is not a word character."""
+    s = (title or "").lower()
+    s = re.sub(r"[\u064b-\u0652\u0640]", "", s)
+    s = re.sub(r"[أإآ]", "ا", s).replace("ى", "ي").replace("ة", "ه")
+    return {t for t in re.split(r"[^\w]+", s) if t}
+
+
+def _is_title_dupe(item: dict, kept: list[dict]) -> bool:
+    """True when `item` is the same song as an earlier kept entry:
+    same duration (both known) and one title's token set is a subset
+    of the other's. The token floor keeps a bare one-word title from
+    matching a longer title of a different song."""
+    tokens = _title_tokens(item.get("title") or "")
+    dur = item.get("duration")
+    if len(tokens) < _MIN_TITLE_TOKENS or dur is None:
+        return False
+    for other in kept:
+        other_dur = other.get("duration")
+        if other_dur is None or other_dur != dur:
+            continue
+        other_tokens = _title_tokens(other.get("title") or "")
+        if len(other_tokens) < _MIN_TITLE_TOKENS:
+            continue
+        if tokens <= other_tokens or other_tokens <= tokens:
+            return True
+    return False
 
 
 def resolve_query(query: str, audio_only: bool = False) -> dict:

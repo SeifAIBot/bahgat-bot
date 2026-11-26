@@ -79,7 +79,40 @@ def test_search_query_dedupes_by_video_id(monkeypatch):
     assert [r["video_id"] for r in results] == ["aaa", "bbb"]
 
 
-# --- opinion stance (live fail #4) -------------------------------------------
+def test_search_query_dedupes_same_song_different_upload(monkeypatch):
+    """v1.1 (video worker's correction): the live فرعون list had the
+    SAME song twice under different uploads/titles, both 3:47 —
+    video ids cannot catch that. A later entry drops when its title
+    tokens are a subset of an earlier entry's (or vice versa) AND
+    the durations are equal. Guards: different durations keep both,
+    and a bare one-word title never collapses another song."""
+    payload = {
+        "entries": [
+            {"id": "aaa", "title": "Marwan Moussa - Fr3on (Official Audio) مروان موسى - فرعون", "duration": 227},
+            {"id": "bbb", "title": "MARWAN MOUSSA - FR3ON | مروان موسي - فرعون", "duration": 227},
+            {"id": "ccc", "title": "مروان موسي - النظام", "duration": 220},
+            {"id": "ddd", "title": "Marwan Moussa - EL 3NWAN (Official Audio)", "duration": 178},
+            {"id": "eee", "title": "Marwan Moussa - EL 3NWAN (Live)", "duration": 250},
+            {"id": "fff", "title": "فرعون", "duration": 182},
+            {"id": "ggg", "title": "فرعون - مزه حلوه لبنانيز", "duration": 182},
+        ]
+    }
+
+    def fake_run(argv, **kwargs):
+        import json
+        return SimpleNamespace(stdout=json.dumps(payload), stderr="", returncode=0)
+
+    monkeypatch.setattr(yt, "_run_yt_dlp", fake_run)
+    results = yt.search_query("مروان موسي فرعون", 7)
+    # bbb is the Fr3on re-upload (subset tokens, same duration);
+    # eee is a different-length version (kept); fff/ggg share a
+    # duration but the one-word title is below the token floor (kept).
+    assert [r["video_id"] for r in results] == [
+        "aaa", "ccc", "ddd", "eee", "fff", "ggg"]
+
+
+# --- opinion stance (hardening; the live reply was sharp, the prompt
+# had no stance instruction, so the sharpness was luck) ----------------
 
 def test_opinion_ask_detection():
     assert looks_like_opinion_ask("ايه رايك في نظريه المليار الذهبي")
@@ -215,7 +248,9 @@ def test_download_error_hint_classification():
 # --- voice check (research method #4) ----------------------------------------
 
 def test_voice_check_flags_the_live_failure():
-    # The v1.0 opinion failure, verbatim shape: restates the theory.
+    # The restatement shape the voice check guards against (the
+    # brief's misread quote — the live opinion reply was actually
+    # sharp; this is the failure mode the check exists to catch).
     flags = voice_check(
         "بحس يا سيدي، دي نظريه بتقول ان فيه ناس عايزه تقلل عدد البشر", 30)
     assert "polite_restatement" in flags
@@ -506,8 +541,10 @@ async def test_bank_voice_retry_succeeds_on_second_attempt(
 
 async def test_opinion_note_reaches_the_router(
         _settings, _memory_fakes, monkeypatch, tmp_db):
-    """The v1.0 opinion failure: the router must see the stance note so
-    the reply takes a position instead of restating the theory."""
+    """Opinion stance hardening: the router must see the stance note
+    so the reply takes a position instead of restating the theory
+    (the live reply happened to be sharp; the prompt had no stance
+    instruction, so that was luck, not a guarantee)."""
     _stub_quota_ok(monkeypatch)
     bot = _FakeStatusBot()
     bot.send_chat_action = AsyncMock()
