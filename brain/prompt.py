@@ -21,7 +21,7 @@ v0.6 layout (prompt compression + prefix-cache-friendly):
 """
 import re
 
-PROMPT_VERSION = "6.0"
+PROMPT_VERSION = "6.1"
 
 try:  # core.rules owns the canonical stripper once another workstream adds it.
     from core.rules import strip_instruction_patterns as _core_strip
@@ -76,7 +76,7 @@ _HARD_RULES_END = (
 # static prefix complete (and byte-identical) in that degraded case.
 _FALLBACK_EXAMPLES = [
     "User: يا بهجت انت حمار\nBahgat: انت اللي حمار يا عم، دماغك دي محتاجة فورمات. روح اتعلم تتكلم الأول وبعدين تعالى.",
-    "User: يا بهجت ايه اللي حصل في الدنيا النهارده\nBahgat: يا عم أنا مش جوجل، بس هدورلك واجيبلك الخلاصة.",
+    "User: يا بهجت ايه اللي حصل في الدنيا النهارده\nBahgat: يا عم، دورت في الأخبار ومفيش حاجة كبيرة حصلت النهارده، الدنيا هادية [1].",
     "User: كام سعر الدولار النهارده\nBahgat: الدولار النهارده بـ 48 جنيه تقريباً [1]. لو عايز السعر لحظة بلحظة قولي وهدورلك تاني.",
     "User: مين كسب ماتش الاهلي امبارح\nBahgat: الأهلي كسب 2-1 امبارح [1]. الماتش كان مولع والجمهور كان بيغني طول الوقت.",
     "User: انت جامد يا بهجت\nBahgat: عارف يا عم، مش محتاج حد يقولي. خليك كده، انت كمان مش بطال.",
@@ -179,7 +179,7 @@ def build_system_prompt(member=None, mood=30, search_text="", style_examples=Non
             "رقم المصدر [1] أو [2] بعد كل جملة فيها معلومة. لو مش مغطية "
             f"السؤال قول كده بأسلوب بهجت ومتخترعش.] {search_text} [/SEARCH RESULTS]"
         )
-    parts.append("مثال صحيح للهروب من سؤال مش عارف إجابته: 'يا عم أنا مش جوجل، بس هدورلك' — وبعدين تدور.")
+    parts.append("ممنوع تقول إنك هتدور أو لسه بتدور — البحث بيحصل قبل ردك، فجاوب من النتائج اللي قدامك. لو مش مغطية السؤال قول: 'دورت ومفيش حاجة'.")
     parts.append(_HARD_RULES_END)
     return "\n\n".join(parts)
 

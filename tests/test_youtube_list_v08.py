@@ -144,50 +144,35 @@ def _pick_state(results, expires_in=600):
             "expires_at": time.time() + expires_in}
 
 
-async def test_pick_renders_photo_choice_and_rekeys_state(settings, tmp_db):
+async def test_pick_edits_list_into_text_choice_and_keeps_state_key(settings, tmp_db):
     ctx, bot_data = _pick_ctx(settings, _pick_state(_results(3)))
     msg = FakePickMessage(-100, 5)
     q = FakeQuery("yt:pick:1", msg, 999)
     update = SimpleNamespace(callback_query=q, update_id=1)
     await h._on_yt_pick_inner(update, ctx)
     q.answer.assert_awaited_once()
-    # Photo view: thumbnail + caption + the two buttons.
-    msg.reply_photo.assert_awaited_once()
-    photo_kwargs = msg.reply_photo.await_args.kwargs
-    assert photo_kwargs["photo"] == "https://i.ytimg.com/vi/id1/hqdefault.jpg"
-    assert "الحلال 1" in photo_kwargs["caption"]
-    rows = photo_kwargs["reply_markup"].inline_keyboard
+    # v0.9: the list message is EDITED into the text choice view (title +
+    # duration + the two buttons) — no photo, no delete, no tombstone.
+    msg.reply_photo.assert_not_awaited()
+    msg.delete.assert_not_awaited()
+    q.edit_message_text.assert_awaited_once()
+    assert "الحلال 1" in q.edit_message_text.await_args.args[0]
+    assert "(3:52)" in q.edit_message_text.await_args.args[0]
+    rows = q.edit_message_text.await_args.kwargs["reply_markup"].inline_keyboard
     assert [b.callback_data for b in rows[0]] == ["yt:video", "yt:audio"]
-    # Old list message deleted; state re-keyed to the new photo message.
-    msg.delete.assert_awaited_once()
-    assert (-100, 5, 999) not in bot_data["yt_requests"]
-    new_state = bot_data["yt_requests"][(-100, 99, 999)]
-    assert new_state["url"] == "https://www.youtube.com/watch?v=id1"
-
-
-async def test_pick_wrong_user_rejected(settings, tmp_db):
-    ctx, bot_data = _pick_ctx(settings, _pick_state(_results(3)))
-    msg = FakePickMessage(-100, 5)
-    q = FakeQuery("yt:pick:0", msg, 123)  # not the requester (999)
-    await h._on_yt_pick_inner(SimpleNamespace(callback_query=q, update_id=1), ctx)
-    q.answer.assert_awaited_once_with("دي مش بتاعتك يا عم", show_alert=True)
-    msg.reply_photo.assert_not_awaited()
+    # State stays keyed on the SAME message id (the list message), now
+    # pointing at the picked video.
     assert (-100, 5, 999) in bot_data["yt_requests"]
+    assert bot_data["yt_requests"][(-100, 5, 999)]["url"] == \
+        "https://www.youtube.com/watch?v=id1"
 
 
-async def test_pick_expired_state_rejected(settings, tmp_db):
-    ctx, bot_data = _pick_ctx(settings, _pick_state(_results(3), expires_in=-10))
+async def test_pick_without_thumbnail_still_edits_in_place(settings, tmp_db):
+    results = _results(3)
+    for r in results:
+        r.pop("thumbnail", None)
+    ctx, bot_data = _pick_ctx(settings, _pick_state(results))
     msg = FakePickMessage(-100, 5)
-    q = FakeQuery("yt:pick:0", msg, 999)
-    await h._on_yt_pick_inner(SimpleNamespace(callback_query=q, update_id=1), ctx)
-    q.answer.assert_awaited_once_with("الطلب ده خلص، ابعت تاني.", show_alert=True)
-    msg.reply_photo.assert_not_awaited()
-
-
-async def test_pick_thumbnail_failure_falls_back_to_text(settings, tmp_db):
-    ctx, bot_data = _pick_ctx(settings, _pick_state(_results(3)))
-    msg = FakePickMessage(-100, 5)
-    msg.reply_photo = AsyncMock(side_effect=RuntimeError("photo failed"))
     q = FakeQuery("yt:pick:2", msg, 999)
     await h._on_yt_pick_inner(SimpleNamespace(callback_query=q, update_id=1), ctx)
     # Same message edited in place to the text choice view.
@@ -199,3 +184,24 @@ async def test_pick_thumbnail_failure_falls_back_to_text(settings, tmp_db):
     # State updated in place (same message id), now pointing at the pick.
     assert bot_data["yt_requests"][(-100, 5, 999)]["url"] == \
         "https://www.youtube.com/watch?v=id2"
+
+
+async def test_pick_wrong_user_rejected(settings, tmp_db):
+    ctx, bot_data = _pick_ctx(settings, _pick_state(_results(3)))
+    msg = FakePickMessage(-100, 5)
+    q = FakeQuery("yt:pick:0", msg, 123)  # not the requester (999)
+    await h._on_yt_pick_inner(SimpleNamespace(callback_query=q, update_id=1), ctx)
+    q.answer.assert_awaited_once_with("دي مش بتاعتك يا عم", show_alert=True)
+    msg.reply_photo.assert_not_awaited()
+    q.edit_message_text.assert_not_awaited()
+    assert (-100, 5, 999) in bot_data["yt_requests"]
+
+
+async def test_pick_expired_state_rejected(settings, tmp_db):
+    ctx, bot_data = _pick_ctx(settings, _pick_state(_results(3), expires_in=-10))
+    msg = FakePickMessage(-100, 5)
+    q = FakeQuery("yt:pick:0", msg, 999)
+    await h._on_yt_pick_inner(SimpleNamespace(callback_query=q, update_id=1), ctx)
+    q.answer.assert_awaited_once_with("الطلب ده خلص، ابعت تاني.", show_alert=True)
+    msg.reply_photo.assert_not_awaited()
+    q.edit_message_text.assert_not_awaited()

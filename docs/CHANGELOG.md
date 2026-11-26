@@ -1,4 +1,91 @@
 # Changelog
+## 2026-11-26 — v0.9 search one-turn + edit-in-place status + YouTube download fix
+
+Seif's exact request (video, test group 03:24–03:27 EET): "عايز لما اقوله
+يدور علي النت و يقولي استني بفكر النتيجه تطلع في نفس الرساله بتاعت
+استني بفكر مش اقوله ايه الحصل عشان النتيجه تطلع" — plus "اغلب الحجات
+مش شغاله صح" and, in the follow-up, "مش بيجيب فيديو اليوتيوب لا صوت
+ولا فيديو صوره بس".
+
+**Root causes (all from the code, confirmed against the video frames):**
+- Search: "سيرش على النت على حادثة الوراق" matched NO `_SEARCH_WORDS`
+  entry (no "سيرش", no "على النت", no "حادثه" — and the normaliser does
+  NOT map على -> علي, so "دور على" missed "دور علي" too), so it fell to
+  just_chat and no search ran before the first LLM call.
+- The prompt TAUGHT the stall: the few-shot pair in
+  `persona/bahgat/examples.md` (and the fallback copy in
+  `brain/prompt.py`) answered a news question with "يا عم أنا مش جوجل،
+  بس هدورلك واجيبلك الخلاصة", and the deflection line in
+  `build_system_prompt` called that dodge "correct". The LLM imitated
+  it, `looks_unknown` did not catch it, and the handler shipped it as
+  the final reply.
+- The old `_UNKNOWN_DEFLECTION` was sent AFTER a search had already run
+  in every path that used it — a promise of a search no later turn
+  delivers. The follow-up "ايه الحصل" then got an LLM "لسه بدور… لما
+  اجيبلك الخلاصه" stall (history contained the promise), also uncaught.
+- Download: v0.8's pick flow sends the choice view as a PHOTO, but the
+  `yt:video`/`yt:audio` callback calls `edit_message_text` on it — the
+  Bot API rejects that on a media message, the callback died before the
+  download even started, and the tap went silent with the picture just
+  sitting there (buttons already removed). The download-failure branch
+  had the same crash, so failures were silent too.
+- Clutter: the status bubble was deleted on every turn and the list
+  message deleted on every pick — a "Deleted message" tombstone each
+  time (visible all over the chat in the video).
+
+**What changed:**
+- `brain/intent.py`: `_SEARCH_WORDS` gains "سيرش", "على النت"/"علي
+  النت", "دور على", "حادثه", "خبر", "عايز اعرف"/"عاوز اعرف"; new
+  `looks_stalling()` ("لسه بدور", "لسه قالك", "اجيبلك/هجيبلك الخلاصه",
+  "استنير") and "مش جوجل"/"بس هدورلك" added to the unknown markers.
+- `brain/prompt.py` + `persona/bahgat/examples.md`: the news-question
+  example now answers from the search ("دورت في الأخبار ومفيش حاجة
+  كبيرة… [1]"); the deflection line is replaced by a ban on promising
+  a search ("ممنوع تقول إنك هتدور أو لسه بتدور…"). PROMPT_VERSION
+  6.0 -> 6.1 (dynamic part still < 300 tokens).
+- `tg/handlers.py` — search endgame: an unanswered reply (unknown or
+  stalling) after a search ran gets ONE firm retry from the grounding;
+  if it still will not answer, the reply is built from the passages
+  directly (`_search_fallback_reply`, extractive) or says plainly that
+  the search found nothing (`_SEARCH_EMPTY`). The old deflection is
+  retired. Fallback replies are never cached. A search question now
+  always ends with an answer in the same turn.
+- `tg/handlers.py` — edit-in-place: `_StatusMessage.finalize()`
+  replaces `delete()`; the final reply, the pick-list, the choice view
+  and the error line all EDIT the bubble. New `_send_final()` (first
+  chunk edits the bubble, the rest go as plain messages; falls back to
+  a normal message when the bubble never went up). Cache hits and quota
+  denials still skip the bubble entirely. Typing indicator unchanged.
+- `tg/handlers.py` — no deletes: a pick EDITS the list message into
+  the text choice view (same message id, same state key). Trade-off,
+  documented: the photo choice view is gone — a text message can never
+  be edited into a photo, and the photo was the reason the list had to
+  be deleted. The thumbnail is dropped.
+- `tg/handlers.py` — download callback: new `_edit_choice_message()`
+  (caption for photo choice views, text otherwise) for the progress /
+  failure / done edits, plus an outer safety net so any failure edits
+  the choice message into an in-character error instead of going
+  silent. A tap now always produces the file or an error line.
+- Tests: `tests/test_search_one_turn_v09.py` (10 new: grounding parse
+  + extractive/empty fallback, one-turn answer in the bubble, empty
+  search, stall-twice fallback, photo-caption download, download
+  failure answers in chat, text-choice edit); `test_status_ux_v08.py`
+  (finalize + error-edit, no delete), `test_youtube_list_v08.py`
+  (pick edits in place, no photo, no delete),
+  `test_cache_quota_v06.py` (search-ran turns retry once now),
+  `test_intent.py` (سيرش keywords + stall detection).
+- 295 tests pass (285 + 10 new), py_compile + ruff clean on the bot
+  code (the 21 ruff hits in `training/colab/*.ipynb` are pre-existing,
+  not touched here).
+- NOT verified live in this VM: the yt-dlp download itself from Cloady
+  (the callback died before `download()` was ever called, so the
+  format/cookies question is still open — the search calls prove
+  yt-dlp reaches YouTube from Cloady, the download is the untested
+  part). First live test after deploy: song → pick → tap فيديو (video
+  arrives) and tap صوت (audio arrives). If the download fails live,
+  the next step is a cookies file on the host — Seif already supplied
+  one for the voice downloads; do NOT reuse it without asking him.
+
 ## 2026-11-26 — v0.8 live status + YouTube pick-list (deploy target: Cloady, no card)
 - **Live status message (`tg/handlers.py`, `_StatusMessage`).** Long turns
   now show ONE editable status bubble (OpenClaw-style progress draft —

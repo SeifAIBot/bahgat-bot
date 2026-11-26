@@ -1,4 +1,5 @@
-"""Live status message (v0.8): one editable bubble, spinner, cleanup."""
+"""Live status message (v0.8, edit-in-place since v0.9): one editable
+bubble, spinner, finalised into the answer — never deleted."""
 import asyncio
 import time
 from types import SimpleNamespace
@@ -50,7 +51,7 @@ class FakeStatusBot:
         return m
 
 
-async def test_status_start_send_edit_delete():
+async def test_status_start_send_edit_finalize():
     bot = FakeStatusBot()
     status = h._StatusMessage(bot, -100, reply_to_message_id=7)
     await status.start()
@@ -63,12 +64,18 @@ async def test_status_start_send_edit_delete():
     msg = bot.sent[0][2]
     assert msg.edit_text.await_count >= 1
     assert "النت" in msg.edit_text.await_args.args[0]
-    await status.delete()
-    assert not status.live
-    assert msg.delete.await_count == 1
-    # Idempotent: a second delete is a no-op (final reply + finally block).
-    await status.delete()
-    assert msg.delete.await_count == 1
+    # v0.9: the bubble is EDITED into the final answer, never deleted.
+    assert await status.finalize("النتيجة: مفيش حاجة", parse_mode="HTML") is True
+    assert status.finalized
+    assert not status.live  # it is the answer now, not a status
+    assert msg.delete.await_count == 0
+    last_edit = msg.edit_text.await_args
+    assert "النتيجة: مفيش حاجة" in last_edit.args[0]
+    assert last_edit.kwargs.get("parse_mode") == "HTML"
+    # Idempotent: a second finalize is a no-op (no extra edit).
+    edits_before = msg.edit_text.await_count
+    assert await status.finalize("again") is False
+    assert msg.edit_text.await_count == edits_before
 
 
 async def test_status_send_failure_never_raises():
@@ -77,7 +84,7 @@ async def test_status_send_failure_never_raises():
     await status.start()  # must not raise — the turn continues without it
     assert not status.live
     await status.set_stage("searching")  # no-op
-    await status.delete()  # no-op
+    assert await status.finalize("النتيجة") is False  # no-op, no bubble
 
 
 async def test_status_spinner_cycles_frames(monkeypatch):
@@ -86,7 +93,7 @@ async def test_status_spinner_cycles_frames(monkeypatch):
     status = h._StatusMessage(bot, -100)
     await status.start()
     await asyncio.sleep(0.3)
-    await status.delete()
+    await status.finalize("done")
     msg = bot.sent[0][2]
     texts = [c.args[0] for c in msg.edit_text.await_args_list]
     frames = {t[0] for t in texts}
@@ -154,7 +161,7 @@ def settings():
     return Settings(telegram_bot_token="x", owner_id=OWNER_ID, allowed_chat_ids="")
 
 
-async def test_status_deleted_when_llm_raises(settings, memory_fakes, monkeypatch, tmp_db):
+async def test_status_edited_into_error_when_llm_raises(settings, memory_fakes, monkeypatch, tmp_db):
     monkeypatch.setattr(
         "brain.memory.check_and_consume_quota",
         lambda u, c, owner_id=None, capacity_replies=None, active_users=None,
@@ -178,5 +185,10 @@ async def test_status_deleted_when_llm_raises(settings, memory_fakes, monkeypatc
     await h.on_group_message(update, ctx)
     # The bubble went up for the turn…
     assert len(bot.sent) == 1
-    # …and was deleted by the finally block even though the turn crashed.
-    assert bot.sent[0][2].delete.await_count == 1
+    # …and v0.9 edits it into the in-character error line instead of
+    # deleting it — and no second message is sent.
+    status_msg = bot.sent[0][2]
+    assert status_msg.delete.await_count == 0
+    assert any("حصلت مشكلة تقنية" in c.args[0]
+               for c in status_msg.edit_text.await_args_list)
+    msg.reply_text.assert_not_called()

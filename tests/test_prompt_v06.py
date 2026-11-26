@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "6.0"
+    assert PROMPT_VERSION == "6.1"
 
 
 def test_system_base_trimmed_about_30_percent():
@@ -77,11 +77,11 @@ def test_dynamic_block_order():
     idx = [s.index(m) for m in ("[PERSONA CONFIG]", "[MEMBER]", "[MOOD]",
                                 "[INSULT RULE]", "[SEARCH RESULTS")]
     assert idx == sorted(idx)
-    # Deflection example + hard rules come after the search block. (The
-    # deflection phrase also occurs inside [STYLE EXAMPLES], so match the
-    # deflection line by its distinctive prefix.)
-    assert s.index("[SEARCH RESULTS") < s.index("مثال صحيح للهروب")
-    assert s.index("مثال صحيح للهروب") < s.rindex(_HARD_RULES_END)
+    # Anti-stall line + hard rules come after the search block. (The
+    # anti-stall phrase also occurs inside [STYLE EXAMPLES], so match the
+    # line by its distinctive prefix.)
+    assert s.index("[SEARCH RESULTS") < s.index("ممنوع تقول إنك هتدور")
+    assert s.index("ممنوع تقول إنك هتدور") < s.rindex(_HARD_RULES_END)
 
 
 def test_all_seven_few_shot_pairs_in_prompt():

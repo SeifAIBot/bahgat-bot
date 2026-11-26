@@ -427,8 +427,12 @@ async def test_handler_unknown_retry_rescues_when_no_search_ran(
     assert memory.get_unknown_stats()["unknown_retries_rescued"] == 1
 
 
-async def test_handler_unknown_no_retry_when_search_already_ran(
+async def test_handler_search_already_ran_retries_once_from_grounding(
         handler_env, settings, tmp_db, monkeypatch):
+    # v0.9: when a search already ran and the first reply is still
+    # unknown, the turn retries ONCE with a firm instruction instead of
+    # sending the old "مش جوجل، بس هدورلك" deflection (a promise of a
+    # search that no later turn delivers).
     async def _fake_grounding(query):
         return ("[1] http://example.com — " + "نص طويل من صفحة موثوقة. " * 20)
 
@@ -438,9 +442,10 @@ async def test_handler_unknown_no_retry_when_search_already_ran(
     user = FakeUser(777, first_name="Ahmed")
     msg = FakeMessage("بهجت كام سعر الدولار", -100222, user)
     await h._on_group_message_inner(make_update(msg, user, -100222, update_id=371), ctx)
-    assert len(router.calls) == 1  # search ran before call 1: no second call
-    assert any("مش جوجل" in t for t in _sent_texts(msg))
-    assert memory.get_unknown_stats()["unknown_retries"] == 0
+    assert len(router.calls) == 2  # firm retry from the grounding
+    assert any("الأهلي كسب" in t for t in _sent_texts(msg))
+    assert not any("هدورلك" in t for t in _sent_texts(msg))
+    assert memory.get_unknown_stats()["unknown_retries_rescued"] == 1
 
 
 async def test_stats_shows_cache_and_pool(handler_env, settings, tmp_db, monkeypatch):

@@ -45,10 +45,16 @@ _YOUTUBE_WORDS = [
     "عايز اغنيه", "عاوز اغنيه", "عايز فيديو", "عاوز فيديو",
 ]
 _SEARCH_WORDS = [
-    "دور علي", "دورلي", "ابحث", "ايه هو", "مين هو", "اخبار", "سعر",
-    "النتيجه", "مين بهجت", "مين كسب", "كسب مين", "كام", "امتى", "فين",
-    "بكام", "ايه اللي حصل", "ايه الحصل", "ايه حصل",
+    "دور علي", "دور على", "دورلي", "ابحث", "ايه هو", "مين هو", "اخبار", "خبر",
+    "سعر", "النتيجه", "مين بهجت", "مين كسب", "كسب مين", "كام", "امتى", "فين",
+    "بكام", "ايه اللي حصل", "ايه الحصل", "ايه حصل", "سيرش", "علي النت",
+    "على النت", "حادثه", "عايز اعرف", "عاوز اعرف",
 ]
+# v0.9: "سيرش على النت على حادثة الوراق" missed every keyword above
+# (no "سيرش", no "على النت", no "حادثه") and fell through to just_chat,
+# so no search ran before the first LLM call and the bot answered with
+# a "هدورلك" promise instead of a result. Note the normaliser does NOT
+# map على -> علي, so both spellings of "على النت" are listed.
 
 
 def detect_intent(text: str) -> str:
@@ -90,6 +96,10 @@ def looks_like_praise(text: str) -> bool:
 UNKNOWN_MARKERS = [
     "مش عارف", "معرفش", "ماعنديش فكره", "مش فاكر", "مش متاكد",
     "ما اعرفش", "لا اعرف", "مش قادر اقولك", "معنديش فكره",
+    # v0.9: "يا عم أنا مش جوجل، بس هدورلك" is a promise of a search that
+    # never comes — the turn ends right after it. Treat it as unanswered
+    # so the handler actually runs the search instead of shipping it.
+    "مش جوجل", "بس هدورلك",
 ]
 
 
@@ -98,6 +108,22 @@ def looks_unknown(reply: str) -> bool:
     # must match the marker "ماعنديش فكره".
     r = normalize_arabic(reply or "")
     return any(normalize_arabic(m) in r for m in UNKNOWN_MARKERS)
+
+
+# v0.9: the "still searching" stall — the LLM claims the search is still
+# in progress ("لسه قالك بدور… لما اجيبلك الخلاصه") instead of answering
+# from the grounding that is already in its prompt. A stall is not a
+# normal reply: the search already ran, so there is nothing left to wait
+# for. The handler retries once with a firm instruction, then falls back
+# to an extractive answer from the passages.
+STALL_MARKERS = [
+    "لسه بدور", "لسه قالك", "اجيبلك الخلاصه", "هجيبلك الخلاصه", "استنير",
+]
+
+
+def looks_stalling(reply: str) -> bool:
+    r = normalize_arabic(reply or "")
+    return any(normalize_arabic(m) in r for m in STALL_MARKERS)
 
 
 _TARGET_RE = re.compile(r"اشتمي?\s+@?([A-Za-z0-9_\u0600-\u06FF]+)")
