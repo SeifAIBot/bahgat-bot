@@ -79,15 +79,16 @@ def test_yaml_roast_target_field_shape():
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
     roast = [e for e in raw if e["trigger"] == "roast"]
-    assert len(roast) == 41  # 40 served + ro-29 (approximate, never served)
+    assert len(roast) == 46  # 45 served + ro-29 (approximate, never served)
     tagged = [e for e in roast if e.get("target") is not None]
     generic = [e for e in roast if e.get("target") is None]
-    assert len(tagged) == 25
-    assert len(generic) == 16  # 11 transcript + 5 user-submitted (ro-37..41)
+    assert len(tagged) == 26
+    assert len(generic) == 20  # 11 transcript + 9 user-submitted (ro-37..42, ro-44..46)
     # Subjects are the people/situations the lines are actually about.
     assert {e["target"] for e in tagged} == {
         "السيسي", "لينا", "الجيش", "ندوش", "المسيحي",
         "كيسنجر", "كارما", "حادثة القطار", "ضيوف اللايف",
+        "ميدو",
     }
     for e in tagged:
         assert isinstance(e["target"], str) and e["target"].strip()
@@ -97,8 +98,8 @@ def test_yaml_roast_target_field_shape():
     assert by_id["ro-21"]["target"] == "السيسي"
     assert by_id["ro-04"]["target"] == "السيسي"
     # Served counts unchanged by tagging (v1.2 counts still hold).
-    assert len(_roast_entries()) == 40  # 35 transcript + 5 user-submitted
-    assert len([e for e in _roast_entries() if e.get("target")]) == 24
+    assert len(_roast_entries()) == 45  # 35 transcript + 10 user-submitted
+    assert len([e for e in _roast_entries() if e.get("target")]) == 25
 
 
 # --- matcher units ------------------------------------------------------------
@@ -172,7 +173,7 @@ def test_bug_case_salah_never_gets_quran_line():
 
 def test_salah_gets_generic_only():
     generic = _generic_lines()
-    assert len(generic) == 16  # 11 transcript + 5 user-submitted
+    assert len(generic) == 20  # 11 transcript + 9 user-submitted
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = _draws(text, 60, target_is_member=False)
         assert seen <= generic
@@ -223,7 +224,7 @@ def test_other_subjects_reach_their_lines():
 
 def test_roast_member_target_gets_generic_person_only():
     safe_generic = _generic_lines(member_safe_only=True)
-    assert len(safe_generic) == 13  # 16 generic - 3 generic family lines
+    assert len(safe_generic) == 15  # 20 generic - 5 generic family lines
     for _ in range(60):
         line = match_reply_bank(
             "يا بهجت اشتم محمد", chat_id=CHAT_ID, target_is_member=True)
@@ -236,9 +237,11 @@ def test_roast_non_member_salah_may_serve_family_generic():
         line for line in generic
         if line in {"يا ولد الوسخة",
                     "البلد بلدنا وهنستردها غصب عن أي ابن دين كلب",
-                    "يا ولاد الزنوه احترمو عقولنا"}
+                    "يا ولاد الزنوه احترمو عقولنا",
+                    "ابن متناكه و ماشي، مغفل و ماشي ، بتاخد من طيزك يطلع من بقك و ماشي لكن غبي يبن المتناكه كمان",
+                    "بعبصو بعض في حته تانيه يا ولاد ال هو مفيش غير الخرابه دي"}
     }
-    assert len(family_generic) == 3  # 2 transcript + ro-40 (user)
+    assert len(family_generic) == 5  # 2 transcript + ro-40, ro-42, ro-44 (user)
     seen = _draws("اشتم صلاح", 80, target_is_member=False)
     assert seen <= generic
     assert seen & family_generic  # family lines reachable for non-members

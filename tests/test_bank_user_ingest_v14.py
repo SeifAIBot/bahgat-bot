@@ -13,6 +13,13 @@ were banked (8 insulted comebacks in-33..in-40, 1 generic roast ro-41),
 so the aggregate counts in this file moved (user 21 -> 30, insulted
 served 31 -> 39, roast served 39 -> 40, generic roast 15 -> 16). The
 round-1 accounting below (SUBMITTED = 24, BANKED = 21) is unchanged.
+
+Round 3 (v1.6 phase 1, same day): Seif added 12 more lines on the page
+(page total 33 -> 45); 10 were banked (5 insulted comebacks in-41..in-45,
+5 roasts ro-42..ro-46), 2 dropped (see tests/test_bank_user_ingest_v16.py).
+Aggregate counts moved again (user 30 -> 40, insulted served 39 -> 44,
+roast served 40 -> 45, generic roast 16 -> 20). The round-1 accounting
+below (SUBMITTED = 24, BANKED = 21) is unchanged.
 """
 from pathlib import Path
 
@@ -97,41 +104,52 @@ def test_all_submitted_lines_accounted_for():
 def test_user_lines_honest_attribution_and_ids():
     raw = _raw()
     user = [e for e in raw if e.get("confidence") == "user"]
-    assert len(user) == 30  # 21 round 1 + 9 round 2 (v1.5)
+    assert len(user) == 40  # 21 round 1 + 9 round 2 (v1.5) + 10 round 3 (v1.6 phase 1)
     assert set(BANKED) <= {e["line"] for e in user}
     for e in user:
         assert e["source"] == "user-submitted"
         # Explicit member_safe tag on every user line (never an omission).
         assert e.get("member_safe") in (True, False)
     assert {e["id"] for e in user if e["trigger"] == "insulted"} == {
-        f"in-{i:02d}" for i in range(16, 41)
+        f"in-{i:02d}" for i in range(16, 46)
     }
     assert {e["id"] for e in user if e["trigger"] == "roast"} == {
         "ro-37", "ro-38", "ro-39", "ro-40", "ro-41",
+        "ro-42", "ro-43", "ro-44", "ro-45", "ro-46",
     }
 
 
 def test_user_insulted_lines_are_member_safe():
     bank = load_bank()
-    assert len(bank["insulted"]) == 39
+    assert len(bank["insulted"]) == 44
     user_insulted = [e for e in bank["insulted"]
                      if e.get("confidence") == "user"]
-    assert len(user_insulted) == 25
+    assert len(user_insulted) == 30
     assert all(e.get("member_safe") is True for e in user_insulted)
 
 
 def test_user_roast_lines_generic_and_tagged():
     bank = load_bank()
-    assert len(bank["roast"]) == 40
+    assert len(bank["roast"]) == 45
     user_roast = [e for e in bank["roast"]
                   if e.get("confidence") == "user"]
-    assert len(user_roast) == 5
-    # Generic (no target:) so they fit any roast target.
-    assert all(e.get("target") is None for e in user_roast)
+    assert len(user_roast) == 10
+    # Generic (no target:) so they fit any roast target — except ro-43,
+    # the subject-targeted ميدو line (v1.6 phase 1, round 3).
+    assert all(e.get("target") is None for e in user_roast
+               if e["id"] != "ro-43")
     by_id = {e["id"]: e for e in user_roast}
     assert by_id["ro-40"]["line"] == FAMILY_LINE
     assert by_id["ro-40"]["member_safe"] is False
+    assert by_id["ro-43"]["target"] == "ميدو"
+    assert by_id["ro-43"]["member_safe"] is True
     for rid in ("ro-37", "ro-38", "ro-39"):
+        assert by_id[rid]["member_safe"] is True
+    # Round-3 family lines are non-member-only; the other round-3 roasts
+    # are person-only.
+    for rid in ("ro-42", "ro-44"):
+        assert by_id[rid]["member_safe"] is False
+    for rid in ("ro-41", "ro-45", "ro-46"):
         assert by_id[rid]["member_safe"] is True
 
 
@@ -139,7 +157,7 @@ def test_family_user_line_never_served_to_members(monkeypatch):
     # The family line must never serve at a member (or unresolved
     # target), but must stay reachable for a resolved non-member.
     # Deterministic check for the member side (choice = last eligible):
-    # ro-41 (v1.5) is the last roast entry now and is member-safe, so
+    # ro-46 (v1.6 phase 1) is the last roast entry now and is member-safe, so
     # the member pick is never the family line.
     monkeypatch.setattr(rb.random, "choice", lambda xs: xs[-1])
     assert match_reply_bank(
@@ -163,7 +181,7 @@ def test_family_user_line_never_served_to_members(monkeypatch):
 def test_user_roast_lines_reachable_for_any_target():
     generic = {e["line"] for e in load_bank()["roast"]
                if e.get("target") is None}
-    assert len(generic) == 16
+    assert len(generic) == 20
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = {
             match_reply_bank(text, chat_id=CHAT_ID, target_is_member=False)

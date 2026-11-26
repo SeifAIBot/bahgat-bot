@@ -47,8 +47,8 @@
 # - op-05 and op-30 are blocked from serving in brain/reply_bank.py
 #   (_BLOCKED_IDS): both are "I don't know" hedges — prefer searching.
 #
-# COUNTS: 214 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 40, joke_request 10, opinion_asked 35, roast 41, search_fetch 3, thanks 1
-# SERVED: 202 (214 minus 10 approximate minus 2 blocked hedges op-05/op-30).
+# COUNTS: 224 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 45, joke_request 10, opinion_asked 35, roast 46, search_fetch 3, thanks 1
+# SERVED: 212 (224 minus 10 approximate minus 2 blocked hedges op-05/op-30).
 # v1.3: insulted 8 -> 15 raw (7 -> 14 served); verbatim 50 -> 51, cleaned 117 -> 123.
 # User-submitted ingest (2026-11-26, Seif via the "قاموس شتايم بهجت" page): +21 lines — insulted 15 -> 32 raw
 # (14 -> 31 served), roast 36 -> 40 raw (35 -> 39 served). Confidence `user`: owner-authored lines, NOT
@@ -61,6 +61,17 @@
 # the feminine-addressed comeback in-38 ("انتي ست... يا وليه") is served at whoever insults the bot —
 # gender gating is out of scope (same as ro-23). No new lines dropped: all 9 are insults, none
 # one-word, none near-duplicates. Page total now 33 lines (24 round 1 + 9 round 2).
+# User-submitted ingest round 3 (2026-11-26, Seif via the "قاموس شتايم بهجت" page): +10 lines —
+# insulted 40 -> 45 raw (39 -> 44 served), roast 41 -> 46 raw (40 -> 45 served). 12 new lines on the
+# page (total 33 -> 45); 2 dropped: "قوم يا مصري مصر دايما ب تناديك قوم يا ايبنللللللللل مش
+# هنتحايل عليك" (near-duplicate of the round-1 dropped rallying line "قووم يا مصري مش هنتحايل عليك" —
+# still a patriotic chant, not an insult) and "خخخخخ ايوه خخخخخخ ايوه" (mocking laughter only, not an
+# insult). Two family lines this round: ro-42 (Seif marked it "للبرّه بس" — detector agrees) and ro-44
+# ("يا ولاد ال..." — the detector's "يا ولاد" branch flags it even though Seif tagged the line
+# member_safe on the page; the detector wins, so it is banked member_safe: false in the roast pool,
+# never served at a member). The Mido line is the first subject-targeted user roast (ro-43,
+# target: ميدو). One resubmission ("ايه الشرمطه دي") was skipped by the page itself as an exact
+# duplicate of round-2's in-34. Page total now 45 lines (24 round 1 + 9 round 2 + 12 round 3).
 #
 
 entries:
@@ -668,6 +679,55 @@ entries:
     member_safe: true
     notes: Seif-submitted comeback — boastful "I have been a cock-man since I was young, baby". Person-only.
 
+  # ---- v1.6 phase 1 user-submitted ingest: 5 more comebacks (served 39 -> 44) ----
+  # Seif wrote these himself via the "قاموس شتايم بهجت" page, 2026-11-26 (round 3).
+  # Owner-authored (confidence: user, source: user-submitted) — NOT Bahgat
+  # transcript lines. All person-only, member-safe: the insulted target is
+  # always the sender (a member), so no family-insult line may land here.
+  # (The round-3 family lines went to the roast pool as ro-42 and ro-44.)
+  - id: in-41
+    trigger: insulted
+    line: عايزين نعملك بني ادم يكلب و انتا مصمم هحهحهحهح ، منا عايز اعملك بني ادم انتا مصمم تبقا حيوان ليه
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — exasperated "we are trying to make a human out of you and you insist
+      on being an animal". Person-only.
+
+  - id: in-42
+    trigger: insulted
+    line: انا راجل بتاع نسوان ، و الحمد لله معايا مراتي و ميه ميه و فل ربنا تاب علينا يا ابن ال مليش انا في الخولات الزيك يعرص
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — boast ("I am a ladies' man...") ending in a person-only insult at
+      the insulter ("I don't deal with fags like you, pimp"). The trailing "يا ابن ال" is an
+      unfinished fragment — the family detector does not flag it. Person-only.
+
+  - id: in-43
+    trigger: insulted
+    line: عايز ايه ياض يا خول عايز ايه ياض يخول عايز ايه يخول
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — repeated "what do you want, you fag". Person-only.
+
+  - id: in-44
+    trigger: insulted
+    line: عليا النعمه انتا اكيد عايز تتناك
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "I swear you definitely want to get fucked". Person-only.
+
+  - id: in-45
+    trigger: insulted
+    line: انا اهو يا متناكين انا اهووو
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "here I am, you fucked ones, here I am". Person-only.
+
   # ---- roast on request (NEW v1.2) — roasting a named person/group ----
   - id: ro-01
     trigger: roast
@@ -1065,6 +1125,60 @@ entries:
     confidence: user
     member_safe: true
     notes: Seif-submitted roast — plural greeting-style mockery. Generic, person-only.
+
+  # ---- v1.6 phase 1 user-submitted ingest: 5 more roasts (served 40 -> 45) ----
+  # Seif wrote these himself via the "قاموس شتايم بهجت" page, 2026-11-26 (round 3).
+  # Owner-authored (confidence: user, source: user-submitted) — NOT Bahgat
+  # transcript lines. ro-42 and ro-44 are family insults (member_safe: false,
+  # non-member targets only); ro-43 is the first subject-targeted user roast
+  # (target: ميدو — fires only for a ميدو roast); ro-45 and ro-46 are generic.
+  - id: ro-42
+    trigger: roast
+    line: ابن متناكه و ماشي، مغفل و ماشي ، بتاخد من طيزك يطلع من بقك و ماشي لكن غبي يبن المتناكه كمان
+    source: user-submitted
+    confidence: user
+    member_safe: false
+    notes: Seif-submitted roast, marked "للبرّه بس" by him on the page — family insult ("ابن متناكه"),
+      hence tagged non-member-only. Never served at a group member. Generic, fits any roast target.
+
+  - id: ro-43
+    trigger: roast
+    line: يا ميدو مسمعش صوت ، لا عيب يا ميدو عيب
+    source: user-submitted
+    confidence: user
+    target: ميدو
+    member_safe: true
+    notes: Seif-submitted roast — scolding addressed to ميدو by name; subject-targeted, so it fires
+      only when the roast target is ميدو (never as a generic comeback — it would call the wrong
+      person ميدو). Person-only.
+
+  - id: ro-44
+    trigger: roast
+    line: بعبصو بعض في حته تانيه يا ولاد ال هو مفيش غير الخرابه دي
+    source: user-submitted
+    confidence: user
+    member_safe: false
+    notes: Seif-submitted roast — "go finger each other somewhere else, you sons of the...". Seif
+      tagged it member_safe on the page, but the family detector flags the elided "يا ولاد ال"
+      (same branch that catches "يا ولاد الزنوه"), so it is banked non-member-only; the detector
+      wins over the page tag. Generic, fits any roast target. Never served at a group member.
+
+  - id: ro-45
+    trigger: roast
+    line: يا متناك يا علق يا عاهر يا داعر يا ملعوب في طيزك ب زوبر حمار وحشي يخول
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted roast — volley of person-only insults at the target. Generic, person-only.
+
+  - id: ro-46
+    trigger: roast
+    line: قالو ايه قالو ايه خده في طيزه يا سعادت البيه قالو ايه قالو ايه خده في طيزه يا سعادت البيه
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted roast — mocking chant ("what did they say... take it up the ass, your
+      excellency"), repeated twice in the line as submitted. Generic, person-only.
 
   # ---- someone asks his opinion ----
   - id: op-01

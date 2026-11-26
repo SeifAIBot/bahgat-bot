@@ -65,7 +65,7 @@ def test_round2_lines_all_banked_with_ids():
         assert ln not in banked_lines, ln
     assert len(NEW_SUBMITTED) == 9
     user = [e for e in raw if e.get("confidence") == "user"]
-    assert len(user) == 30  # 21 round 1 + 9 round 2
+    assert len(user) == 40  # 21 round 1 + 9 round 2 + 10 round 3 (v1.6 phase 1)
     by_line = {e["line"]: e for e in user}
     assert {by_line[ln]["id"] for ln in NEW_INSULTED} == {
         f"in-{i:02d}" for i in range(33, 41)
@@ -96,22 +96,22 @@ def test_round2_lines_honest_attribution_and_tags():
 
 def test_round2_insulted_pool_counts():
     bank = load_bank()
-    assert len(bank["insulted"]) == 39
+    assert len(bank["insulted"]) == 44
     user_insulted = [e for e in bank["insulted"]
                      if e.get("confidence") == "user"]
-    assert len(user_insulted) == 25  # 17 round 1 + 8 round 2
+    assert len(user_insulted) == 30  # 17 round 1 + 8 round 2 + 5 round 3
     assert all(e.get("member_safe") is True for e in user_insulted)
 
 
 def test_round2_roast_reachable_for_any_target():
     bank = load_bank()
-    assert len(bank["roast"]) == 40
+    assert len(bank["roast"]) == 45
     user_roast = [e for e in bank["roast"]
                   if e.get("confidence") == "user"]
-    assert len(user_roast) == 5  # 4 round 1 + 1 round 2
+    assert len(user_roast) == 10  # 4 round 1 + 1 round 2 + 5 round 3
     generic = {e["line"] for e in bank["roast"]
                if e.get("target") is None}
-    assert len(generic) == 16
+    assert len(generic) == 20
     assert NEW_ROAST[0] in generic
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = {
@@ -125,10 +125,10 @@ def test_round2_no_duplicates():
     raw = _raw()
     lines = [e["line"] for e in raw]
     assert len(lines) == len(set(lines))
-    assert len(raw) == 214
+    assert len(raw) == 224
     user_lines = [e["line"] for e in raw
                   if e.get("confidence") == "user"]
-    assert len(user_lines) == len(set(user_lines)) == 30
+    assert len(user_lines) == len(set(user_lines)) == 40
     # Feminine-addressed comeback is banked deliberately (see module
     # docstring); its wording is recorded, not silently dropped.
     assert ("انتي ست متربيتيش عيب احترمي نفسك ، احتررررمي نفسك يا وليه "
