@@ -67,6 +67,64 @@ def _run_yt_dlp(args: list[str], timeout: int) -> subprocess.CompletedProcess:
         raise RuntimeError(f"yt-dlp failed: {detail[:300]}") from e
 
 
+def search_query(query: str, limit: int = 5) -> list[dict]:
+    """Search YouTube for up to `limit` results (v0.8 pick-list).
+
+    Returns [{video_id, url, title, duration, thumbnail}] where duration
+    is seconds (or None) and thumbnail is a public i.ytimg.com URL.
+    Uses a single "ytsearchN:<query>" argument (after "--") with
+    --flat-playlist (metadata-only, fast) — raw user text is never a bare
+    yt-dlp argument, and URLs / option-like input are rejected exactly
+    like in resolve_query(). Raises ValueError / RuntimeError the same
+    way; returns [] only when the search legitimately finds nothing.
+    """
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("empty query")
+    q = query.strip()
+    if q.startswith("-"):
+        raise ValueError("query must not start with '-'")
+    if _is_youtube_url(q) or "://" in q or q.lower().startswith("http"):
+        raise ValueError("search_query takes a plain-text query, not a URL")
+    n = max(1, min(int(limit), 10))
+    cmd = ["yt-dlp", "--dump-single-json", "--no-download", "--no-playlist",
+           "--flat-playlist", "--", f"ytsearch{n}:{q}"]
+    res = _run_yt_dlp(cmd, timeout=60)
+    try:
+        data = json.loads(res.stdout)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise RuntimeError("yt-dlp returned unparsable metadata") from e
+    entries = []
+    if isinstance(data, dict):
+        entries = data.get("entries") or []
+    out = []
+    for entry in entries[:n]:
+        if not isinstance(entry, dict) or not entry.get("id"):
+            continue
+        video_id = str(entry["id"])
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        duration = entry.get("duration")
+        try:
+            duration = int(duration) if duration is not None else None
+        except (TypeError, ValueError):
+            duration = None
+        thumb = entry.get("thumbnail")
+        if not thumb:
+            thumbs = entry.get("thumbnails") or []
+            if isinstance(thumbs, list) and thumbs:
+                last = thumbs[-1] if isinstance(thumbs[-1], dict) else {}
+                thumb = last.get("url")
+        if not thumb:
+            thumb = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+        out.append({
+            "video_id": video_id,
+            "url": url,
+            "title": (entry.get("title") or "").strip() or video_id,
+            "duration": duration,
+            "thumbnail": thumb,
+        })
+    return out
+
+
 def resolve_query(query: str, audio_only: bool = False) -> dict:
     """Resolve a YouTube URL or a plain-text search query to video metadata.
 

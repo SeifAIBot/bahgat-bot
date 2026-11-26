@@ -1,4 +1,49 @@
 # Changelog
+## 2026-11-26 — v0.8 live status + YouTube pick-list (deploy target: Cloady, no card)
+- **Live status message (`tg/handlers.py`, `_StatusMessage`).** Long turns
+  now show ONE editable status bubble (OpenClaw-style progress draft —
+  research in `docs/research-bot-ux.md`): sent with
+  `disable_notification` so the group isn't pinged, edited in place as
+  the stage changes, a braille spinner (⠋⠙⠹…) cycling every 1.5 s
+  while a stage runs long, and deleted when the final reply lands — and
+  in a `finally` block on errors — so no stale bubble is ever left
+  behind. Never raises: if the bubble can't be sent, the turn continues
+  without it. Skipped entirely for instant paths (cache hits, quota
+  denials). The existing `_typing_loop` chat action is kept alongside
+  it. Stage lines are Bahgat-voiced Egyptian dialect: "بفكر يا عم،
+  استنى…" (thinking) → "بدورلك على النت، يا عم…" (searching) →
+  "بجيبلك من يوتيوب، استنى…" (YouTube) → "بنزلها لك دلوقتي، استنى
+  شوية…" (downloading).
+- **YouTube pick-list (MIRAL-style).** `tools/youtube.py` gains
+  `search_query(query, limit=5)` (yt-dlp `ytsearchN:` + `--flat-playlist`,
+  same URL/option validation as `resolve_query`). Text queries now
+  return up to 5 results shown as "• نتائج البحث ← <query>" with
+  numbered full titles and one inline button per result (button text
+  truncated to 40 chars). New callback `yt:pick:<index>` (index only —
+  `callback_data` is 1–64 BYTES, values resolve server-side) renders
+  the وعد-style choice view: the video's thumbnail as a photo message
+  with title + duration caption and the two buttons "🎬 فيديو" /
+  "🎵 ملف صوتي" (falls back to editing the list in place if the
+  thumbnail can't be sent — a text message can't be edited into a photo
+  via editMessageMedia). Same requester-only guard, 10-min TTL and
+  callback dedup as the existing YouTube callbacks. One result skips
+  the list and goes straight to the choice view; a pasted YouTube URL
+  does the same; zero results answers in character ("دورت يا عم ومفيش
+  حاجة بالاسم ده، جرب اسم تاني.").
+- Tests: `tests/test_status_ux_v08.py` (5 tests: stage lines, bubble
+  lifecycle + idempotent delete, send-failure never raises, spinner
+  cycling, bubble deleted when the LLM turn raises) and
+  `tests/test_youtube_list_v08.py` (10 tests: duration/button helpers,
+  list text + keyboard + 64-byte callback cap, pick parsing,
+  search_query parsing + validation, pick photo view + state re-keying,
+  requester-only guard, expiry, thumbnail-failure fallback).
+- 285 tests pass (270 + 15 new), py_compile + ruff clean.
+- Not verified live in this VM: yt-dlp is not installed here, so the
+  real `ytsearch5:` call was exercised only with a mocked runner; the
+  Cloady Docker image installs it from requirements.txt
+  (yt-dlp>=2026.7.4). First live test after deploy: ask for a song and
+  tap through list → photo choice → download.
+
 ## 2026-11-26 — v0.7e Cloady deploy + search follow-up fix (deploy target: Cloady, no card)
 - **Deploy moved Render → Cloady.** Render's "Add Card" modal blocked the
   free deploy on Seif's brand-new account (account-level anti-fraud check;

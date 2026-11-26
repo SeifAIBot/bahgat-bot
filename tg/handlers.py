@@ -109,6 +109,7 @@ from core.persona import load_examples, load_persona
 from core.rules import is_owner
 from tools.search import fetch_many, fetch_page_text, web_search
 from tools.youtube import resolve_query as _yt_resolve_query
+from tools.youtube import search_query as _yt_search_query
 
 logger = logging.getLogger("bahgat")
 ROOT = Path(__file__).resolve().parents[1]
@@ -820,6 +821,111 @@ async def _typing_loop(bot, chat_id: int, stop: asyncio.Event):
             continue
 
 
+# --- live status message (v0.8) ---------------------------------------------
+# One editable status bubble per turn (OpenClaw-style progress draft — see
+# docs/research-bot-ux.md): sent with disable_notification so the group
+# isn't pinged, edited in place as the stage changes, a spinner frame
+# cycling while a stage runs long, and deleted when the final reply lands
+# (and in a finally block on errors) so no stale bubble is ever left.
+# Bots can't use Premium animated emoji, so the spinner edit + the chat
+# actions are the closest a bot can get to a "thinking" animation.
+_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_STATUS_LINES = {
+    "thinking": "بفكر يا عم، استنى…",
+    "searching": "بدورلك على النت، يا عم…",
+    "youtube": "بجيبلك من يوتيوب، استنى…",
+    "downloading": "بنزلها لك دلوقتي، استنى شوية…",
+}
+_STATUS_SPIN_SECONDS = 1.5
+
+
+def status_line(stage: str, frame: int = 0) -> str:
+    """One status bubble line: spinner frame + Bahgat-voiced stage text."""
+    text = _STATUS_LINES.get(stage) or _STATUS_LINES["thinking"]
+    return f"{_SPINNER_FRAMES[frame % len(_SPINNER_FRAMES)]} {text}"
+
+
+class _StatusMessage:
+    """One editable status bubble for a single turn. Never raises: if the
+    bubble can't be sent, the turn continues without it."""
+
+    def __init__(self, bot, chat_id: int, reply_to_message_id=None):
+        self._bot = bot
+        self._chat_id = chat_id
+        self._reply_to = reply_to_message_id
+        self._stage = "thinking"
+        self._frame = 0
+        self._msg = None
+        self._dead = False
+        self._lock = asyncio.Lock()
+        self._spin_task = None
+        self._stopped = asyncio.Event()
+
+    @property
+    def live(self) -> bool:
+        return self._msg is not None and not self._dead
+
+    async def start(self):
+        try:
+            self._msg = await self._bot.send_message(
+                self._chat_id, status_line(self._stage, self._frame),
+                reply_to_message_id=self._reply_to, disable_notification=True)
+        except Exception as e:
+            logger.warning("status message send failed: %s", e)
+            self._dead = True
+            return
+        self._spin_task = asyncio.create_task(self._spin())
+
+    async def _edit(self, text: str):
+        if self._msg is None or self._dead:
+            return
+        async with self._lock:
+            if self._msg is None or self._dead:
+                return
+            try:
+                await self._msg.edit_text(text)
+            except Exception:
+                # Message gone / not editable: stop trying quietly.
+                self._dead = True
+
+    async def _spin(self):
+        while not self._stopped.is_set():
+            try:
+                await asyncio.wait_for(self._stopped.wait(), timeout=_STATUS_SPIN_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+            if self._stopped.is_set() or self._dead:
+                break
+            self._frame = (self._frame + 1) % len(_SPINNER_FRAMES)
+            await self._edit(status_line(self._stage, self._frame))
+
+    async def set_stage(self, stage: str):
+        if stage not in _STATUS_LINES:
+            stage = "thinking"
+        self._stage = stage
+        # Advance the frame so the new text always differs from the last
+        # edit (Telegram rejects editing a message to identical text).
+        self._frame = (self._frame + 1) % len(_SPINNER_FRAMES)
+        await self._edit(status_line(self._stage, self._frame))
+
+    async def delete(self):
+        """Idempotent: safe to call twice (final reply + finally block)."""
+        self._stopped.set()
+        if self._spin_task is not None:
+            self._spin_task.cancel()
+            try:
+                await self._spin_task
+            except asyncio.CancelledError:
+                pass
+            self._spin_task = None
+        if self._msg is not None and not self._dead:
+            self._dead = True
+            try:
+                await self._msg.delete()
+            except Exception:
+                pass
+
+
 # --- insult-target resolution (pure helper, unit-tested) --------------------
 
 def resolve_insult_target(text, *, reply_to_user=None, mentions=None, recent_speakers=None):
@@ -1088,6 +1194,83 @@ def _yt_state(bot_data, chat_id, message_id):
         if c == chat_id and m == message_id:
             return state, (c, m, _u)
     return None, None
+
+
+# --- YouTube pick-list (v0.8, MIRAL-style) ----------------------------------
+_YT_PICK_MAX = 5  # same count as the music bots in the research note
+_YT_BUTTON_TITLE_LEN = 40  # full title stays in the message body above
+
+
+def _fmt_duration(duration) -> str:
+    """Seconds -> m:ss; '؟' when unknown (matches the old inline code)."""
+    if isinstance(duration, (int, float)):
+        return f"{int(duration) // 60}:{int(duration) % 60:02d}"
+    return str(duration) if duration else "؟"
+
+
+def _truncate_button(text: str, limit: int = _YT_BUTTON_TITLE_LEN) -> str:
+    t = (text or "").strip()
+    return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
+
+
+def _pick_list_text(query: str, results: list[dict]) -> str:
+    """Header + numbered full titles, MIRAL-style."""
+    lines = [f"• نتائج البحث ← {query}"]
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r.get('title') or '؟'} ({_fmt_duration(r.get('duration'))})")
+    return "\n".join(lines)
+
+
+def _pick_list_keyboard(results: list[dict]) -> InlineKeyboardMarkup:
+    """One button per result; callback carries only the index (server-side
+    map pattern — callback_data is 1-64 BYTES, never the payload)."""
+    rows = [[InlineKeyboardButton(
+        f"{i + 1}. {_truncate_button(r.get('title') or '؟')}",
+        callback_data=f"yt:pick:{i}")]
+        for i, r in enumerate(results)]
+    return InlineKeyboardMarkup(rows)
+
+
+def _parse_pick_callback(data: str):
+    """'yt:pick:2' -> 2; anything else -> None."""
+    m = re.fullmatch(r"yt:pick:(\d+)", data or "")
+    return int(m.group(1)) if m else None
+
+
+async def _search_youtube(query: str, limit: int = _YT_PICK_MAX) -> list[dict]:
+    """YouTube search via yt-dlp (to_thread — it's a subprocess). [] on
+    failure so the caller can answer in character instead of crashing."""
+    try:
+        return await asyncio.to_thread(_yt_search_query, query, limit)
+    except Exception as e:
+        logger.warning("youtube search failed: %s", e)
+        return []
+
+
+async def _send_yt_choice(msg, context, chat_id, user, query: str, resolved: dict):
+    """Send the video/audio choice message for one resolved video (وعد-style
+    buttons) and store yt_requests state keyed (chat_id, message_id,
+    requester). Returns the sent message."""
+    title = resolved.get("title") or resolved.get("url") or query
+    duration = _fmt_duration(resolved.get("duration"))
+    size = resolved.get("approx_size")
+    size_txt = f" (~{size / 1024 / 1024:.0f}MB)" if isinstance(size, (int, float)) else ""
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 فيديو", callback_data="yt:video"),
+         InlineKeyboardButton("🎵 ملف صوتي", callback_data="yt:audio")]
+    ])
+    choice_msg = await msg.reply_text(
+        f"لقيت: {title} ({duration}{size_txt}) — فيديو ولا صوت بس؟", reply_markup=kb)
+    context.application.bot_data.setdefault("yt_requests", {})[
+        (chat_id, choice_msg.message_id, user.id)
+    ] = {
+        "query": query,
+        "url": resolved.get("url"),
+        "video_id": resolved.get("video_id"),
+        "title": title,
+        "expires_at": time.time() + _YT_TTL,
+    }
+    return choice_msg
 
 
 # --- owner commands ---------------------------------------------------------
@@ -1540,6 +1723,10 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
 
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
+    # v0.8: one live status bubble for the turn (deleted in the finally
+    # below, and right before the final reply — never left behind).
+    status = _StatusMessage(context.bot, chat_id, reply_to_message_id=msg.message_id)
+    await status.start()
     try:
         # History BEFORE inserting current message (v0.6: 6, was 8).
         history_rows = recent_messages(chat_id, limit=6)
@@ -1568,32 +1755,42 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
 
         intent = intent_early
         if intent == "youtube":
-            resolved = await _resolve_youtube(text)
-            title = resolved.get("title") or resolved.get("url") or text
-            duration = resolved.get("duration")
-            if isinstance(duration, (int, float)):
-                duration = f"{int(duration) // 60}:{int(duration) % 60:02d}"
-            else:
-                duration = duration or "؟"
-            size = resolved.get("approx_size")
-            size_txt = f" (~{size / 1024 / 1024:.0f}MB)" if isinstance(size, (int, float)) else ""
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("فيديو", callback_data="yt:video"),
-                 InlineKeyboardButton("صوت بس", callback_data="yt:audio")]
-            ])
-            choice_msg = await msg.reply_text(
-                f"لقيت: {title} ({duration}{size_txt}) — فيديو ولا صوت بس؟", reply_markup=kb
-            )
+            await status.set_stage("youtube")
+            # A pasted YouTube URL resolves straight to the choice view
+            # (old behaviour); a text query searches up to 5 results.
+            if "youtu" in (text or "").lower():
+                resolved = await _resolve_youtube(text)
+                await status.delete()
+                await _send_yt_choice(msg, context, chat_id, user, text, resolved)
+                add_message(chat_id, context.bot.id, "assistant", "عايزها فيديو ولا صوت بس؟")
+                return
+            results = await _search_youtube(text)
+            if not results:
+                await status.delete()
+                await _send_text(msg, "دورت يا عم ومفيش حاجة بالاسم ده، جرب اسم تاني.")
+                add_message(chat_id, context.bot.id, "assistant", "دورت ومفيش حاجة.")
+                return
+            if len(results) == 1:
+                # Single hit: skip the list, straight to the choice view.
+                resolved = dict(results[0])
+                resolved["approx_size"] = None
+                await status.delete()
+                await _send_yt_choice(msg, context, chat_id, user, text, resolved)
+                add_message(chat_id, context.bot.id, "assistant", "عايزها فيديو ولا صوت بس؟")
+                return
+            # Pick-list: header + numbered titles, one button per result.
+            await status.delete()
+            list_msg = await msg.reply_text(
+                _pick_list_text(text, results),
+                reply_markup=_pick_list_keyboard(results))
             context.application.bot_data.setdefault("yt_requests", {})[
-                (chat_id, choice_msg.message_id, user.id)
+                (chat_id, list_msg.message_id, user.id)
             ] = {
                 "query": text,
-                "url": resolved.get("url"),
-                "video_id": resolved.get("video_id"),
-                "title": title,
+                "results": results,
                 "expires_at": time.time() + _YT_TTL,
             }
-            add_message(chat_id, context.bot.id, "assistant", "عايزها فيديو ولا صوت بس؟")
+            add_message(chat_id, context.bot.id, "assistant", "اختار من اللي لقيته.")
             return
 
         search_text = ""
@@ -1602,8 +1799,10 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             # Search runs BEFORE the first LLM call for search intents.
             # v0.7e: the query inherits the conversation topic for short
             # follow-ups ("ايه الحصل" -> "...حادثة الوراق ايه الحصل").
+            await status.set_stage("searching")
             search_text = await _search_grounding(_search_query(text, history))
             search_ran = bool(search_text) and not search_text.startswith("[SEARCH FAILED]")
+            await status.set_stage("thinking")
 
         system = _build_system_prompt(member, member["mood"], search_text, insult_level, target_name)
         memory_block = _build_memory_block(member, member["mood"])
@@ -1627,7 +1826,9 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         # unknown, deflect directly — no wasted second call. Counters
         # (unknown_retries / unknown_retries_rescued) feed /stats.
         if looks_unknown(reply) and not search_ran and intent != "search":
+            await status.set_stage("searching")
             search_text2 = await _search_grounding(_search_query(text, history))
+            await status.set_stage("thinking")
             if search_text2 and not search_text2.startswith("[SEARCH FAILED]"):
                 system2 = _build_system_prompt(member, member["mood"], search_text2, insult_level, target_name)
                 messages2 = (
@@ -1677,6 +1878,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         if use_voice and time.time() - _last_voice.get(voice_key, 0) < _VOICE_COOLDOWN:
             use_voice = False
         # Text first, then voice (whole short reply or none — never split).
+        await status.delete()
         await _send_text(msg, reply)
         if use_voice:
             _last_voice[voice_key] = time.time()
@@ -1699,6 +1901,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             except Exception as e:
                 logger.warning("voice failed, text already sent: %s", e)
     finally:
+        await status.delete()
         stop_typing.set()
         typing_task.cancel()
         try:
@@ -1807,6 +2010,96 @@ async def _on_callback_inner(update, context):
                 pass
 
 
+# --- YouTube pick callback (v0.8) ---------------------------------------------
+
+async def on_yt_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if q is None or q.message is None:
+        return
+    try:
+        await _on_yt_pick_inner(update, context)
+    except RetryAfter:
+        logger.warning("yt pick hit RetryAfter, no fallback sent")
+    except Exception:
+        logger.exception("yt pick error for update %s", update.update_id)
+
+
+async def _on_yt_pick_inner(update, context):
+    q = update.callback_query
+    chat_id = q.message.chat_id
+    settings = context.application.bot_data.get("settings")
+
+    # Mute applies to callbacks too (same as yt:video/yt:audio).
+    if _is_muted():
+        user = q.from_user
+        if user is None or settings is None or not is_owner(user.id, settings.owner_id):
+            return
+
+    # Dedup callback_query.id (prune entries >1h old).
+    now = time.time()
+    for cid in [c for c, ts in _seen_callbacks.items() if now - ts > _CALLBACK_DEDUP_TTL]:
+        del _seen_callbacks[cid]
+    if q.id in _seen_callbacks:
+        return
+    _seen_callbacks[q.id] = now
+
+    state, key = _yt_state(context.application.bot_data, chat_id, q.message.message_id)
+    if state is None or now > state.get("expires_at", 0):
+        await q.answer("الطلب ده خلص، ابعت تاني.", show_alert=True)
+        return
+    requester_id = key[2]
+    if q.from_user is None or q.from_user.id != requester_id:
+        await q.answer("دي مش بتاعتك يا عم", show_alert=True)
+        return
+    idx = _parse_pick_callback(q.data or "")
+    results = state.get("results") or []
+    if idx is None or idx >= len(results):
+        await q.answer("الاختيار ده خلص.", show_alert=True)
+        return
+    video = results[idx]
+    await q.answer()
+
+    title = video.get("title") or "؟"
+    duration = _fmt_duration(video.get("duration"))
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 فيديو", callback_data="yt:video"),
+         InlineKeyboardButton("🎵 ملف صوتي", callback_data="yt:audio")]
+    ])
+    new_state = {
+        "query": state.get("query"),
+        "url": video.get("url"),
+        "video_id": video.get("video_id"),
+        "title": title,
+        "expires_at": state.get("expires_at", now + _YT_TTL),
+    }
+    bot_data = context.application.bot_data
+    # A text message can't be edited into a photo (editMessageMedia only
+    # works on messages that already have media), so the وعد-style view
+    # is a new photo message and the list message is deleted. If the
+    # thumbnail can't be sent, fall back to editing the list in place.
+    thumb = video.get("thumbnail")
+    if thumb:
+        try:
+            sent = await q.message.reply_photo(
+                photo=thumb, caption=f"{title}\n⏱ {duration}", reply_markup=kb)
+            bot_data.setdefault("yt_requests", {})[
+                (chat_id, sent.message_id, requester_id)] = new_state
+            bot_data.get("yt_requests", {}).pop(key, None)
+            try:
+                await q.message.delete()
+            except Exception:
+                pass
+            return
+        except Exception as e:
+            logger.warning("pick thumbnail failed, falling back to text choice: %s", e)
+    bot_data.setdefault("yt_requests", {})[key] = new_state
+    try:
+        await q.edit_message_text(
+            f"{title} ({duration}) — فيديو ولا صوت بس؟", reply_markup=kb)
+    except Exception:
+        pass
+
+
 def register_handlers(app: Application, settings):
     app.bot_data["settings"] = settings
     app.bot_data["router"] = BrainRouter(settings)
@@ -1814,6 +2107,7 @@ def register_handlers(app: Application, settings):
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS, on_group_message))
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, on_group_message))
     app.add_handler(CallbackQueryHandler(on_callback, pattern=r"^yt:(video|audio)$"))
+    app.add_handler(CallbackQueryHandler(on_yt_pick, pattern=r"^yt:pick:\d+$"))
     app.add_handler(CommandHandler("stats", on_stats))
     app.add_handler(CommandHandler("reload", on_reload_command))
     app.add_handler(ChatMemberHandler(on_my_chat_member, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
