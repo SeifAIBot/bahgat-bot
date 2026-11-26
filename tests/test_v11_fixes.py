@@ -279,11 +279,11 @@ def test_bank_loads_and_excludes_risky_lines():
         "joke_request", "dismiss", "challenge", "search_fetch",
         "roast", "condolence",
     }
-    # v1.3: 184 entries in the file minus 10 approximate (never served)
-    # minus the 2 blocked hedges (op-05, op-30) = 172 served.
-    assert sum(len(v) for v in bank.values()) == 172
-    assert len(bank["insulted"]) == 14
-    assert len(bank["roast"]) == 35
+    # v1.4: 205 entries in the file minus 10 approximate (never served)
+    # minus the 2 blocked hedges (op-05, op-30) = 193 served.
+    assert sum(len(v) for v in bank.values()) == 193
+    assert len(bank["insulted"]) == 31
+    assert len(bank["roast"]) == 39
     assert len(bank["joke_request"]) == 10
     assert len(bank["opinion_asked"]) == 31
     assert len(bank["challenge"]) == 36
@@ -299,7 +299,7 @@ def test_bank_loads_and_excludes_risky_lines():
     _bank_path = _Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml"
     with open(_bank_path, encoding="utf-8") as f:
         raw = _yaml.safe_load(f)["entries"]
-    assert len(raw) == 184
+    assert len(raw) == 205
     _broad = ["ابن", "ولد", "ولاد", "ام", "أم", "ابو", "أبو",
               "عيله", "بنت", "مرات", "حفيد", "جد"]
     for e in raw:
@@ -356,19 +356,19 @@ def test_bank_greeting_and_challenge():
 
 def test_bank_rotation_never_repeats_consecutively():
     # Rotation guarantee: a pick never repeats any of the previous 5
-    # picks from the same category (pool 14 > window 5, so the pool never
+    # picks from the same category (pool 31 > window 5, so the pool never
     # resets mid-run — the invariant holds strictly).
     reload_bank()
     picks = [
         match_reply_bank("يا بهجت انت حمار", chat_id=-1001, is_owner=False)
-        for _ in range(200)
+        for _ in range(400)
     ]
     for i, p in enumerate(picks):
         assert p not in picks[max(0, i - 5):i]
-    # And the full insult pool (14 lines) is covered, not just 2-3 favourites.
-    # 200 draws: a given line is picked with p≈1/14 per draw, so missing
-    # one entirely is ~1e-5 — effectively deterministic.
-    assert len(set(picks)) == 14
+    # And the full insult pool (31 lines) is covered, not just 2-3 favourites.
+    # 400 draws: a given line is picked with p≈1/26 per draw (31 - 5 window),
+    # so missing one entirely is ~1e-5 — effectively deterministic.
+    assert len(set(picks)) == 31
     # Small pools (greeting, 4 served lines) reset after exhaustion, so
     # each 4-block is a full distinct cycle — the v1.1 pattern.
     reload_bank()

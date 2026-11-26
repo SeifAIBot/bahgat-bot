@@ -1,4 +1,4 @@
-"""Bahgat reply bank — v1.2 retrieval fast-path (184 entries).
+"""Bahgat reply bank — v1.2 retrieval fast-path (205 entries).
 
 Bahgat's REAL lines (persona/bahgat/reply_bank.yaml, built from his own
 transcripts — never invented) served verbatim for the highest-frequency
@@ -9,8 +9,11 @@ and the only method that guarantees a real lazma lands verbatim (see
 docs/research-persona-methods.md §1, method #1, ranked highest impact).
 
 Rules, enforced here in code (never left to the prompt):
-- Only verbatim/cleaned lines are served. "approximate" lines (uncertain
-  speaker attribution in the transcripts) are loaded but never served.
+- Only verbatim/cleaned/user lines are served. "approximate" lines
+  (uncertain speaker attribution in the transcripts) are loaded but
+  never served. "user" lines are owner-authored (Seif wrote them on
+  the insults page — source: user-submitted), NOT Bahgat transcript
+  lines, and are served exactly like verbatim/cleaned.
 - op-05 / op-30 ("مش عارف" hedges) are never served: their own bank
   notes say prefer searching over the hedge.
 - MEMBER SAFETY (v1.2, Seif 2026-11-26): bank lines carrying a

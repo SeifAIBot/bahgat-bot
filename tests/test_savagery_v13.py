@@ -181,22 +181,23 @@ def test_voice_check_soft_polite_markers():
 
 # --- bank: insulted pool grew, honestly ----------------------------------------
 
-def test_insulted_pool_grew_to_14_served():
+def test_insulted_pool_grew_to_31_served():
     import yaml
     from pathlib import Path
     raw = yaml.safe_load(open(
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
     insulted_raw = [e for e in raw if e["trigger"] == "insulted"]
-    assert len(insulted_raw) == 15  # 8 in v1.2 -> 15 (1 approximate)
-    assert len(load_bank()["insulted"]) == 14  # 7 served -> 14 served
-    assert len(raw) == 184
-    assert sum(len(v) for v in load_bank().values()) == 172
+    assert len(insulted_raw) == 32  # 15 transcript -> 32 (+17 user)
+    assert len(load_bank()["insulted"]) == 31  # 14 served -> 31 served
+    assert len(raw) == 205
+    assert sum(len(v) for v in load_bank().values()) == 193
     conf = {e["confidence"] for e in insulted_raw}
-    assert conf <= {"verbatim", "cleaned", "approximate"}
+    assert conf <= {"verbatim", "cleaned", "approximate", "user"}
     assert sum(1 for e in insulted_raw if e["confidence"] == "verbatim") == 6
     assert sum(1 for e in insulted_raw if e["confidence"] == "cleaned") == 8
     assert sum(1 for e in insulted_raw if e["confidence"] == "approximate") == 1
+    assert sum(1 for e in insulted_raw if e["confidence"] == "user") == 17
 
 
 def test_insulted_pool_no_near_duplicates_or_generic_filler():
@@ -236,7 +237,7 @@ def test_insulted_pool_has_no_family_insult():
     for e in raw:
         if e["trigger"] == "insulted":
             assert e["source"] and e["confidence"] in (
-                "verbatim", "cleaned", "approximate")
+                "verbatim", "cleaned", "approximate", "user")
             assert e["id"].startswith("in-")
 
 

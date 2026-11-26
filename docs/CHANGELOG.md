@@ -1,4 +1,10 @@
 # Changelog
+## 2026-11-26 — v1.4: ingest Seif's submitted insults into the reply bank
+
+Seif wrote 24 insult lines on the "قاموس شتايم بهجت" page. 21 were banked: 17 insulted comebacks (in-16..in-32, served 14 → 31) and 4 generic roasts (ro-37..ro-40, served 35 → 39). Bank total 184 → 205 raw entries (193 served). New confidence level `user` for owner-authored lines (source: user-submitted) — served like verbatim/cleaned, never presented as Bahgat transcript lines; only `approximate` is never served. All user lines carry an explicit `member_safe` tag; the one outsiders-only family line (ro-40, "يا ولاد الزنوه احترمو عقولنا", Seif marked it "للبرّه بس") is `member_safe: false` and can only serve at resolved non-member targets. Dropped 3 lines: "يا حبيبي يا مصر…" (patriotic chant) and "قووم يا مصري…" (rallying line) — not insults, no pool fits them; "مصممممممص" — single-word exclamation, breaks the bank's no-one-word-padding rule and duplicates in-30's "مصمص".
+
+**Verified:** 446 tests pass (439 baseline + 7 new in tests/test_bank_user_ingest_v14.py), py_compile + ruff clean. Detector/tag agreement checked: the family detector flags exactly the one tagged family line among the user lines.
+
 ## 2026-11-26 — v1.3 live-test fixes: insult misroute, roast targeting, savagery, download fallbacks + cookies env var
 
 Seif's live test of v1.2 in the group (screenshot 19:53–19:56 EET) + his verdict: the bot "مش اجريسف خالص" (not aggressive at all) — he wants a savage bot ("عايزه بوت متوحش"), the insults are weak/ordinary, and he wants them all varied and creative. He warned that if we cannot fix the savagery he will take the code and make it more savage himself. Three live failures in the same test: (1) "يا بهجت انتا حمار" was answered with the search-empty line; (2) "اشتم صلاح" got the incoherent roast "عاوز يغير في القرآن يا متناك؟"; (3) the YouTube download STILL fails live post-v1.1 ("يوتيوب رافض الطلب من السيرفر").

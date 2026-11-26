@@ -1,5 +1,7 @@
 """v1.2 bank expansion: 177 lines (36 -> 177), roast + condolence
 v1.3: insulted 7 -> 14 served (184 entries total).
+v1.4 user-submitted ingest (Seif, insults page): +21 lines — insulted
+14 -> 31 served, roast 35 -> 39 served (205 entries total).
 triggers, member_safe tagging for family-insult lines (Seif's rule change
 2026-11-26 19:15 EET: family insults allowed, but NEVER at group members),
 target-aware verify filter, fail-safe insult-level resolution.
@@ -61,11 +63,11 @@ def test_bank_v12_counts():
         "joke_request", "dismiss", "challenge", "search_fetch",
         "roast", "condolence",
     }
-    assert sum(len(v) for v in bank.values()) == 172
+    assert sum(len(v) for v in bank.values()) == 193
     assert {k: len(v) for k, v in bank.items()} == {
-        "catchphrase": 24, "greeting": 4, "insulted": 14,
+        "catchphrase": 24, "greeting": 4, "insulted": 31,
         "opinion_asked": 31, "joke_request": 10, "dismiss": 15,
-        "challenge": 36, "search_fetch": 2, "roast": 35,
+        "challenge": 36, "search_fetch": 2, "roast": 39,
         "condolence": 1,
     }
     # Every entry has source + trigger + confidence marking.
@@ -74,10 +76,10 @@ def test_bank_v12_counts():
     raw = yaml.safe_load(open(
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
-    assert len(raw) == 184
+    assert len(raw) == 205
     for e in raw:
         assert e["id"] and e["trigger"] and e["line"] and e["source"]
-        assert e["confidence"] in ("verbatim", "cleaned", "approximate")
+        assert e["confidence"] in ("verbatim", "cleaned", "approximate", "user")
         assert e.get("member_safe", True) in (True, False)
 
 
@@ -93,7 +95,7 @@ def test_bank_family_lines_all_tagged():
     broad = ["ابن", "ولد", "ولاد", "ام", "أم", "ابو", "أبو", "عيله",
              "بنت", "مرات", "حفيد", "جد"]
     tagged = [e for e in raw if e.get("member_safe") is False]
-    assert len(tagged) == 14
+    assert len(tagged) == 15  # 14 transcript family lines + ro-40 (user)
     for e in raw:
         if contains_family_insult(e["line"]):
             assert e.get("member_safe") is False, e["id"]
@@ -115,7 +117,7 @@ def test_bank_no_near_duplicate_generic_insults():
 
 def test_roast_member_target_gets_person_only_lines():
     safe = _roast_lines(member_safe_only=True)
-    assert len(safe) == 23  # 35 served roast - 12 served family lines
+    assert len(safe) == 26  # 39 served roast - 13 served family lines
     for _ in range(30):
         line = match_reply_bank(
             "يا بهجت اشتم محمد", chat_id=CHAT_ID, target_is_member=True)
@@ -124,7 +126,7 @@ def test_roast_member_target_gets_person_only_lines():
 
 def test_roast_non_member_target_may_serve_family_lines():
     false_lines = _roast_lines(member_safe_only=False) - _roast_lines(True)
-    assert len(false_lines) == 12
+    assert len(false_lines) == 13  # 12 transcript + ro-40 (user)
     seen = {
         match_reply_bank(
             "يا بهجت اشتم السيسي", chat_id=CHAT_ID, target_is_member=False)

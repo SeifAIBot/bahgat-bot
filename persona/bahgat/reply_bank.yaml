@@ -15,10 +15,13 @@
 #   the source audio before trusting these word-for-word.
 # - approximate: the words are attested but the segment is fragmentary or
 #   the speaker attribution is uncertain (see notes). Loaded but NEVER served.
+# - user: written by Seif himself (the owner) via the insults page — owner-authored, NOT attested in any
+#   transcript. Served exactly like verbatim/cleaned; the `source: user-submitted` field marks them.
 #
 # HARD RULES APPLIED (updated 2026-11-26 19:15 EET, Seif)
-# - NOTHING invented: every line is attested in a transcript. No line was
-#   composed from memory.
+# - NOTHING invented: every transcript line is attested in a transcript. No line was
+#   composed from memory. The ONLY exception is `confidence: user` lines: written by Seif himself
+#   (source: user-submitted) — owner-authored, never presented as Bahgat's words.
 # - FAMILY INSULTS ARE BANKED BUT TAGGED: lines containing a father/mother/
 #   family insult carry `member_safe: false` and are served ONLY when the
 #   insult target is a resolved non-member — never at a group member, never
@@ -44,9 +47,15 @@
 # - op-05 and op-30 are blocked from serving in brain/reply_bank.py
 #   (_BLOCKED_IDS): both are "I don't know" hedges — prefer searching.
 #
-# COUNTS: 184 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 15, joke_request 10, opinion_asked 35, roast 36, search_fetch 3, thanks 1
-# SERVED: 172 (184 minus 10 approximate minus 2 blocked hedges op-05/op-30).
+# COUNTS: 205 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 32, joke_request 10, opinion_asked 35, roast 40, search_fetch 3, thanks 1
+# SERVED: 193 (205 minus 10 approximate minus 2 blocked hedges op-05/op-30).
 # v1.3: insulted 8 -> 15 raw (7 -> 14 served); verbatim 50 -> 51, cleaned 117 -> 123.
+# User-submitted ingest (2026-11-26, Seif via the "قاموس شتايم بهجت" page): +21 lines — insulted 15 -> 32 raw
+# (14 -> 31 served), roast 36 -> 40 raw (35 -> 39 served). Confidence `user`: owner-authored lines, NOT
+# Bahgat transcript lines — served like verbatim/cleaned (only `approximate` is never served). 3 submitted
+# lines dropped: "يا حبيبي يا مصر يا مصر يا حبيبتي يا مصر يا مصر" (patriotic chant) and
+# "قووم يا مصري مش هنتحايل عليك" (rallying line) — neither fits an insult pool — and "مصممممممص"
+# (single-word exclamation: breaks the bank's no-one-word-padding rule, and duplicates in-30's "مصمص").
 #
 
 entries:
@@ -441,6 +450,147 @@ entries:
       "قحب" is Whisper spelling of "قحبة". Bahgat to Lina, mocking her youth and sense. Person-only;
       distinct from ro-30 (the "مهنة القحبة" question).
 
+  # ---- v1.4 user-submitted ingest: 18 more comebacks (served 14 -> 32) ----
+  # Seif wrote these himself via the "قاموس شتايم بهجت" page, 2026-11-26.
+  # Owner-authored (confidence: user, source: user-submitted) — NOT Bahgat
+  # transcript lines. All person-only, member-safe: the insulted target is
+  # always the sender (a member), so no family-insult line may land here.
+  - id: in-16
+    trigger: insulted
+    line: انيكها و انتا ماسكها
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — taunting the insulter. Person-only.
+
+  - id: in-17
+    trigger: insulted
+    line: احترم نفسك بدل ما اركبك يخول بلدك
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — warning before the ride. Person-only.
+
+  - id: in-18
+    trigger: insulted
+    line: زبي مانجو متيجي تعالجو
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — boastful invitation. Person-only.
+
+  - id: in-19
+    trigger: insulted
+    line: يخووووول انيك انتا و الاقرع العرص
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — double target (the insulter + the bald one). Person-only.
+
+  - id: in-20
+    trigger: insulted
+    line: يا اقرررع
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — one-word call-out. Person-only.
+
+  - id: in-21
+    trigger: insulted
+    line: حاسس ان زوبي نار
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — first-person boast as a dismissive reply. Person-only.
+
+  - id: in-22
+    trigger: insulted
+    line: يا سالب يا مبعر احترم رجولتك حتي
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — shaming the insulter's manhood. Person-only.
+
+  - id: in-23
+    trigger: insulted
+    line: يخي بزعل علي الشباب
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — condescending pity for the young insulter. Person-only.
+
+  - id: in-24
+    trigger: insulted
+    line: يا كس الكلبه هوهو بعيد
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — animal insult, person-only (no kinship element).
+
+  - id: in-25
+    trigger: insulted
+    line: زبي مليان و علي طيزك هيجان
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — crude boast at the insulter. Person-only.
+
+  - id: in-26
+    trigger: insulted
+    line: اخرس اخرس يا مزني يا عرص
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "shut up" volley. Person-only.
+
+  - id: in-27
+    trigger: insulted
+    line: هركبك و الف بيك مصر كلها يخول
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — the tour threat. Person-only.
+
+  - id: in-28
+    trigger: insulted
+    line: يا نفسي انيكك بس انا محترم
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — mock-polite restraint. Person-only.
+
+  - id: in-29
+    trigger: insulted
+    line: هزها و غور ياض اتفو علي دي اشكال
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "shake it and get lost, spit on these faces". Person-only.
+
+  - id: in-30
+    trigger: insulted
+    line: مصمص بعيد صدعتنا
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "suck it far away, you gave me a headache". Person-only.
+
+  - id: in-31
+    trigger: insulted
+    line: لولا اني محترم كنت ركبتك ركوب البعير
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — the camel-ride conditional. Person-only.
+
+  - id: in-32
+    trigger: insulted
+    line: يا الللله منك لله
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — exasperated "may God deal with you". Person-only.
+
   # ---- roast on request (NEW v1.2) — roasting a named person/group ----
   - id: ro-01
     trigger: roast
@@ -787,6 +937,43 @@ entries:
     notes: 'Two attestations: [4858.96 - 4862.96] "معلش يا أستاذ، إحنا اللقاء مع قحاب" and [4878.26 - 4879.98]
       "أنا لقاء النهارضة مع قحاب". Bahgat announcing the live''s theme to the guest محمد. Normalized from
       both.'
+
+  # ---- v1.4 user-submitted ingest: 4 more generic roasts (served 35 -> 39) ----
+  # Seif wrote these himself via the "قاموس شتايم بهجت" page, 2026-11-26.
+  # Owner-authored (confidence: user, source: user-submitted) — NOT Bahgat
+  # transcript lines. Generic (no `target:`) so they fit any roast target.
+  - id: ro-37
+    trigger: roast
+    line: بص هتجيب زبي و تغرقه كاتشب و مايونيز و تمصمص يسالب
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted roast — elaborate crude instruction to the target. Person-only.
+
+  - id: ro-38
+    trigger: roast
+    line: كنت بموت في عنيك كنت بحبك نيك
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted roast — crude lyric-style line aimed at the target. Person-only.
+
+  - id: ro-39
+    trigger: roast
+    line: عارف كرستيانو؟ انا زبيانو يا يا منيك لف و صدرها
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted roast — joke-format (Cristiano setup, crude punchline). Person-only.
+
+  - id: ro-40
+    trigger: roast
+    line: يا ولاد الزنوه احترمو عقولنا
+    source: user-submitted
+    confidence: user
+    member_safe: false
+    notes: Seif-submitted roast, marked "للبرّه بس" by him on the page — family insult ("ولاد الزنا"),
+      hence tagged non-member-only. Never served at a group member.
 
   # ---- someone asks his opinion ----
   - id: op-01
