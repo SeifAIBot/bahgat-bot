@@ -339,7 +339,10 @@ async def test_handler_insult_never_cached(handler_env, settings, tmp_db):
     user = FakeUser(777, first_name="Ahmed")
     msg = FakeMessage("بهجت انت حمار", -100222, user)
     await h._on_group_message_inner(make_update(msg, user, -100222, update_id=321), ctx)
-    assert len(router.calls) == 1
+    # v1.1: the insult takes the reply-bank fast path (a verbatim Bahgat
+    # comeback, no LLM call) — it is still never cached, which is what
+    # this test guards.
+    assert len(router.calls) == 0
     assert memory.get_cached_reply(
         normalize_cache_text("بهجت انت حمار"), "just_chat", "angry") is None
 

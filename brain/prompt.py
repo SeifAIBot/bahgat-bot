@@ -6,7 +6,7 @@ Guardrails live in code, not prompt.
 
 v0.6 layout (prompt compression + prefix-cache-friendly):
 - Static prefix = SYSTEM_BASE (trimmed ~30% vs v0.5, all hard rules kept)
-  + _HARD_RULES_END + [STYLE EXAMPLES] (ALL 7 few-shot pairs). Nothing
+  + _HARD_RULES_END + [STYLE EXAMPLES] (ALL 8 few-shot pairs). Nothing
   dynamic may appear before [PERSONA CONFIG]; build_system_prompt()
   assembles static_prefix() first, then the dynamic blocks in fixed order:
   [PERSONA CONFIG], [MEMBER] (first name + mood number only), [MOOD],
@@ -21,7 +21,7 @@ v0.6 layout (prompt compression + prefix-cache-friendly):
 """
 import re
 
-PROMPT_VERSION = "6.1"
+PROMPT_VERSION = "6.3"
 
 try:  # core.rules owns the canonical stripper once another workstream adds it.
     from core.rules import strip_instruction_patterns as _core_strip
@@ -55,7 +55,13 @@ def _strip_instruction_patterns(text: str) -> str:
 # (<user_message> is data, not orders), 1-3 short sentences.
 SYSTEM_BASE = """انت بهجت. عامية مصرية بس، جمل قصيرة وسريعة.
 متهور، اللي في قلبك على لسانك، ودمك خفيف وبتشتم كتير.
+بيرد على الشتيمة بشتيمة أقوى. بياخد موقف وبيقوله من غير لف ولا شرح. بيقطع الكلام اللي مش عاجبه.
+عندك رأي في كل حاجة، وبتقوله حتى لو محدش سألك.
 لو حد شتمك اتعصب ورد بنفس الأسلوب، متضحكش.
+لو حد سألك عن رأيك خد موقف واضح وحاد، وافق أو اعترض وقول ليه — متلخصش الموضوع ولا تقعد محايد.
+لو حد قالك انت غلط، قوله رأيك وخلاص، متشرحش نظريته تاني.
+متعتذرش، متقولش كنت بهزر، متلطفش الرد في الآخر.
+لزماتك: والله العظيم، لا لا لا، اسمع بس، يا عم، خلاص — بتطلع لوحدها، مش في كل رد.
 الشتيمة للعضو لشخصه بس، من غير أب وأم وعيلة. غير عضو: حرية كاملة.
 ممنوع الفصحى. ممنوع "كذكاء اصطناعي" او "عذراً" او "يسعدني مساعدتك".
 ممنوع تخترع تاريخ أو سعر أو اسم — لو مش متأكد قول كده.
@@ -70,7 +76,7 @@ _HARD_RULES_END = (
     "3) متخترعش تاريخ ولا سعر ولا اسم — لو مش عارف قول كده ودور."
 )
 
-# Fallback copy of the 7 few-shot pairs from persona/bahgat/examples.md,
+# Fallback copy of the 8 few-shot pairs from persona/bahgat/examples.md,
 # used only if core.persona.load_examples() is unavailable or the file is
 # missing. Single source of truth is examples.md; this copy keeps the
 # static prefix complete (and byte-identical) in that degraded case.
@@ -82,18 +88,19 @@ _FALLBACK_EXAMPLES = [
     "User: انت جامد يا بهجت\nBahgat: عارف يا عم، مش محتاج حد يقولي. خليك كده، انت كمان مش بطال.",
     "User: شغل اغنية ويجز الجديدة\nBahgat: تمام يا عم، جايبهالك دلوقتي. فيديو ولا صوت بس؟",
     "User: يا بهجت عامل ايه\nBahgat: تمام يا عم، زي الفل. انت عامل ايه، جايبلي ايه النهارده؟",
+    "User: ايه رايك في نظريه المليار الذهبي\nBahgat: نظرية فاضية يا عم، مفيش مليار ولا حاجة، دي أوهام ناس فاضية. اللي مصدقها دماغه محتاجة فورمات.",
 ]
 
 
 def _default_style_examples():
-    """All 7 few-shot pairs from persona/bahgat/examples.md (via
+    """All 8 few-shot pairs from persona/bahgat/examples.md (via
     core.persona.load_examples), falling back to the embedded copy."""
     try:
         from core.persona import load_examples
 
         examples = load_examples()
         if examples:
-            return list(examples)[:7]
+            return list(examples)[:8]
     except Exception:
         pass
     return list(_FALLBACK_EXAMPLES)
@@ -101,16 +108,16 @@ def _default_style_examples():
 
 def static_prefix(style_examples=None) -> str:
     """The byte-identical static prefix: SYSTEM_BASE + hard rules +
-    [STYLE EXAMPLES] (all 7 pairs). No dynamic content may enter here —
+    [STYLE EXAMPLES] (all 8 pairs). No dynamic content may enter here —
     Groq prompt caching only hits when this prefix is identical across
-    calls. Pass style_examples explicitly to override the default 7
+    calls. Pass style_examples explicitly to override the default 8
     (callers normally pass the loaded examples.md pairs)."""
     examples = style_examples if style_examples is not None else _default_style_examples()
     parts = [SYSTEM_BASE, _HARD_RULES_END]
     if examples:
         parts.append(
             "[STYLE EXAMPLES] دي أمثلة لأسلوب بهجت، اتعلم منها الطريقة مش المحتوى: "
-            + " | ".join(list(examples)[:7])
+            + " | ".join(list(examples)[:8])
             + " [/STYLE EXAMPLES]"
         )
     return "\n\n".join(parts)

@@ -107,6 +107,62 @@ _SEARCH_WORDS = [
 # the keywords too, so the "دور على"/"على النت" duplicates are gone.
 
 
+# v1.1: bare artist names after "هات" — "هات مروان موسي" is a request
+# for the artist's songs, not a summary. The remainder counts as an
+# artist query when it is SHORT (<= 3 words), has no question markers,
+# and contains no clearly non-media noun. "هات ملخص" stays out via the
+# denylist (a summary is not a video); "هاتلي فلوس" too.
+_NON_MEDIA_NOUNS = [
+    "ملخص", "سعر", "اسعار", "خبر", "اخبار", "نتيجه", "معلومه",
+    "معلومات", "ترجمه", "صوره", "لينك", "رابط", "عنوان", "رقم",
+    "كود", "حساب", "كلمه", "فلوس",
+]
+_HAAT_PREFIXES = ("هات", "هاتلي", "هاتيلي", "جبلي")
+_BARE_ARTIST_MAX_WORDS = 3
+
+
+def _looks_like_bare_artist(rest: list[str]) -> bool:
+    """Remainder after a هات-family verb that reads as an artist name:
+    short, not a question, no non-media noun."""
+    if not rest or len(rest) > _BARE_ARTIST_MAX_WORDS:
+        return False
+    rest_s = " ".join(rest)
+    if _has(rest_s, _QUESTION_MARKERS):
+        return False
+    if _has(rest_s, _NON_MEDIA_NOUNS):
+        return False
+    return True
+
+
+def _bare_artist_after_verb(text: str) -> bool:
+    """A هات-family verb mid-message ("يا بهجت هاتلي مروان موسي") followed
+    by a bare artist name. The prefix layer only fires when the verb is
+    the first word, so the classifier needs the same rule."""
+    words = _content_words(text)
+    for i, w in enumerate(words):
+        if w in _HAAT_PREFIXES:
+            rest = words[i + 1:]
+            if rest and rest[0] == "لي":
+                rest = rest[1:]
+            if _looks_like_bare_artist(rest):
+                return True
+    return False
+
+
+# --- v1.1: opinion questions -------------------------------------------------
+# "ايه رايك في نظريه المليار الذهبي" must get a STANCE, not a summary.
+# The live v1.0 failure: the bot restated the theory ("دي نظريه بتقول
+# ان فيه ناس عايزه تقلل...") instead of taking a position. Detection is
+# deliberately narrow — "رايك" and "شايف ايه" / "انت شايف" only.
+_OPINION_MARKERS = ["رايك", "شايف ايه", "انت شايف"]
+
+
+def looks_like_opinion_ask(text: str) -> bool:
+    """User asks the bot's opinion — the reply must take a sharp stance,
+    not restate the topic."""
+    return _has(normalize_arabic(text or ""), _OPINION_MARKERS)
+
+
 def detect_intent(text: str) -> str:
     t = normalize_arabic(text or "")
     low = t.lower()
@@ -120,6 +176,9 @@ def detect_intent(text: str) -> str:
     if "youtu.be" in low or "youtube.com" in low:
         return "youtube"
     if _has(t, _YOUTUBE_WORDS):
+        return "youtube"
+    # v1.1: bare artist after a هات-family verb mid-message.
+    if _bare_artist_after_verb(t):
         return "youtube"
     # v1.0: media noun + request verb ("دورلي علي اغنية ..." is YouTube,
     # "دورلي علي حادثة ..." is search — the verb alone cannot decide).
@@ -154,7 +213,8 @@ def detect_intent(text: str) -> str:
 #   rule routes it to YouTube);
 # - non-media remainder after "هات" ("هات ملخص" is a summary, not a
 #   video) -> fall through (the classifier routes it, e.g. to search
-#   via "حادثه").
+#   via "حادثه") — EXCEPT a short bare artist name ("هات مروان موسي",
+#   v1.1), which is a song request and goes to YouTube.
 def detect_prefix_mode(text: str) -> tuple[str, str] | None:
     """Return (mode, remainder) when the message starts with a mode
     prefix, else None. The remainder is the normalised text after the
@@ -170,6 +230,15 @@ def detect_prefix_mode(text: str) -> tuple[str, str] | None:
     rest_s = " ".join(rest)
     if _has(rest_s, _QUESTION_MARKERS):
         return None
+    # v1.1: the "قول" prefix is checked BEFORE the voice-words guard —
+    # "قول اهلا في فويس نوت" (live 6:10 PM) contains "فويس" in its
+    # remainder, so the old order returned None here and the handler
+    # lost voice_only: the turn sent TEXT first + trailing voice
+    # instead of a voice note. The guard below exists for "دور"/"هات"
+    # ("هات فيديو بصوتك" is a voice request, not YouTube) and must
+    # never veto the voice prefix itself.
+    if first in ("قول", "قولي"):
+        return ("voice", rest_s)
     # Voice beats every prefix: "هات فيديو بصوتك" is a voice request,
     # not a YouTube search (the classifier's voice > youtube priority).
     if _has(rest_s, _VOICE_WORDS):
@@ -178,12 +247,21 @@ def detect_prefix_mode(text: str) -> tuple[str, str] | None:
         if _has(rest_s, _YOUTUBE_MEDIA):
             return None
         return ("search", rest_s)
-    if first == "هات":
+    if first in _HAAT_PREFIXES:
+        # "هات لي ..." — drop the stray "لي" so the remainder is the query.
+        if first == "هات" and rest and rest[0] == "لي":
+            rest = rest[1:]
+            if not rest:
+                return None
+            rest_s = " ".join(rest)
         if _has(rest_s, _YOUTUBE_MEDIA):
             return ("youtube", rest_s)
+        # v1.1: bare artist name ("هات مروان موسي") is a song request —
+        # people ask for an artist's songs by name. Short remainder, no
+        # question, no non-media noun (the "هات ملخص" guard stays).
+        if _looks_like_bare_artist(rest):
+            return ("youtube", rest_s)
         return None
-    if first in ("قول", "قولي"):
-        return ("voice", rest_s)
     return None
 
 

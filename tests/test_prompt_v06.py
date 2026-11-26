@@ -1,5 +1,5 @@
 """v0.6 prompt tests — static prefix byte-identical (Groq prompt caching),
-SYSTEM_BASE trimmed ~30%, all 7 few-shot pairs in the static prefix,
+SYSTEM_BASE budget, all 8 few-shot pairs in the static prefix,
 hard rules in the prefix AND at the end, dynamic blocks in fixed order.
 """
 from brain.prompt import (
@@ -27,21 +27,27 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "6.1"
+    assert PROMPT_VERSION == "6.3"
 
 
-def test_system_base_trimmed_about_30_percent():
-    # ~30% cut vs v0.5 (634 -> 448 chars, -29.3%), all hard rules kept.
-    assert len(SYSTEM_BASE) < V05_SYSTEM_BASE_CHARS
-    assert len(SYSTEM_BASE) <= int(V05_SYSTEM_BASE_CHARS * 0.75)
+def test_system_base_v11_budget():
+    # v0.6 trimmed SYSTEM_BASE ~30% vs v0.5 (634 -> 448 chars). v1.1
+    # deliberately grows it again (behaviour-as-verbs, agenda,
+    # anti-softening, anchor lazma — docs/research-persona-methods.md
+    # §6.1): the budget is now < 1000 chars, with every hard rule kept
+    # and the new behaviour lines present.
+    assert len(SYSTEM_BASE) < 1000
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
                  "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>"):
         assert rule in SYSTEM_BASE
+    for line in ("بيرد على الشتيمة بشتيمة أقوى", "عندك رأي في كل حاجة",
+                 "متعتذرش، متقولش كنت بهزر", "لزماتك:"):
+        assert line in SYSTEM_BASE
 
 
 def test_static_prefix_byte_identical_across_members_moods_search():
     examples = load_examples()
-    assert len(examples) == 7
+    assert len(examples) == 8
     p1 = build_system_prompt(
         member={"first_name": "سيف", "username": "seif"}, mood=20,
         search_text="نتيجة بحث مختلفة تماما", style_examples=examples,
@@ -84,14 +90,14 @@ def test_dynamic_block_order():
     assert s.index("ممنوع تقول إنك هتدور") < s.rindex(_HARD_RULES_END)
 
 
-def test_all_seven_few_shot_pairs_in_prompt():
+def test_all_eight_few_shot_pairs_in_prompt():
     examples = load_examples()
-    assert len(examples) == 7
+    assert len(examples) == 8
     s = build_system_prompt(member={"first_name": "سيف"}, mood=30,
                             style_examples=examples)
     for pair in examples:
         assert pair in s, f"missing few-shot pair: {pair[:40]}"
-    # All 7 live in the STATIC prefix (before any dynamic block).
+    # All 8 live in the STATIC prefix (before any dynamic block).
     prefix = s.split("[MEMBER]")[0]
     for pair in examples:
         assert pair in prefix
@@ -122,8 +128,8 @@ def test_prompt_size_reported(capsys):
         style_examples=examples)
     prefix = static_prefix(examples)
     dynamic_chars = len(s) - len(prefix)
-    print(f"\n[v0.6 prompt] SYSTEM_BASE={len(SYSTEM_BASE)} chars "
-          f"(v0.5: {V05_SYSTEM_BASE_CHARS}); "
+    print(f"\n[v1.1 prompt] SYSTEM_BASE={len(SYSTEM_BASE)} chars "
+          f"(v0.5: {V05_SYSTEM_BASE_CHARS}, v0.6: 448); "
           f"static prefix={len(prefix)} chars / "
           f"{BrainRouter.estimate_tokens(prefix)} tokens (len//2); "
           f"full system prompt (member+mood+persona, no search)={len(s)} chars / "
@@ -135,7 +141,7 @@ def test_prompt_size_reported(capsys):
     # The cacheable static prefix dominates the prompt now; the per-call
     # dynamic part (persona/member/mood/rules) is the only uncached chunk.
     assert BrainRouter.estimate_tokens(s[len(prefix):]) < 300
-    assert len(SYSTEM_BASE) < V05_SYSTEM_BASE_CHARS
+    assert len(SYSTEM_BASE) < 1000
 
 
 def test_memory_block_unchanged():

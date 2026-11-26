@@ -15,9 +15,11 @@ Security (v0.5, Workstream A):
 - If yt-dlp is not installed, resolve_query/download fail cleanly with
   RuntimeError (callers show an in-character failure) — never fake results.
 """
-import json, subprocess, os, uuid
+import json, subprocess, os, uuid, logging
 from pathlib import Path
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 MAX_BYTES = 50 * 1024 * 1024
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +56,18 @@ def _is_youtube_url(value: str) -> bool:
         return False
 
 
+def _pick_error_detail(detail: str) -> str:
+    """yt-dlp's stderr starts with WARNINGS; the cause is the ERROR line.
+    Prefer the last 'ERROR:' / 'yt-dlp: error:' line so the host log
+    actually says WHY the download failed (the first 300 chars are
+    usually SSL/progress warnings, not the cause)."""
+    lines = [ln.strip() for ln in (detail or "").splitlines() if ln.strip()]
+    for line in reversed(lines):
+        if line.startswith("ERROR:") or line.startswith("yt-dlp: error:"):
+            return line[:300]
+    return (detail or "")[:300]
+
+
 def _run_yt_dlp(args: list[str], timeout: int) -> subprocess.CompletedProcess:
     """Run yt-dlp. FileNotFoundError (not installed) and non-zero exits
     both become RuntimeError with a caller-safe message."""
@@ -64,7 +78,38 @@ def _run_yt_dlp(args: list[str], timeout: int) -> subprocess.CompletedProcess:
         raise RuntimeError("yt-dlp is not installed on this host") from e
     except subprocess.CalledProcessError as e:
         detail = (e.stderr or e.stdout or "").strip()
-        raise RuntimeError(f"yt-dlp failed: {detail[:300]}") from e
+        raise RuntimeError(f"yt-dlp failed: {_pick_error_detail(detail)}") from e
+
+
+# v1.1: YouTube's player API is where the bot-check bites (search uses a
+# different endpoint and works without it). The Android player client
+# bypasses the check without cookies — verified on the training-video
+# downloads in this VM (web client + cookies bot-checked every attempt;
+# android client downloaded fine). Used by every call that touches the
+# player API (resolve + download); search stays as-is, it works.
+_YT_PLAYER_CLIENT_ARGS = ["--extractor-args", "youtube:player_client=android"]
+
+
+def _cookies_args() -> list[str]:
+    """--cookies args when the host provides a cookies file, else [].
+
+    v1.1 fallback ONLY: the Android player client is the default and
+    needs no cookies. If downloads still bot-check on the host, the
+    operator may set YT_COOKIES_FILE to a Netscape-format cookies.txt
+    on the host. The cookies MUST come from a THROWAWAY Google/YouTube
+    account created for the bot — never from Seif's own account (his
+    cookies file stays out of the host entirely). See
+    docs/YOUTUBE_COOKIES.md for how to create and
+    refresh it. A set-but-missing file logs a warning and proceeds
+    without cookies — the bot never crashes over this.
+    The file path is never logged."""
+    path = (os.environ.get("YT_COOKIES_FILE") or "").strip()
+    if not path:
+        return []
+    if not os.path.isfile(path):
+        logger.warning("YT_COOKIES_FILE is set but the file does not exist; continuing without cookies")
+        return []
+    return ["--cookies", path]
 
 
 def search_query(query: str, limit: int = 5) -> list[dict]:
@@ -122,7 +167,17 @@ def search_query(query: str, limit: int = 5) -> list[dict]:
             "duration": duration,
             "thumbnail": thumb,
         })
-    return out
+    # v1.1: ytsearch can return the same video twice (live: EL 3NWAN
+    # appeared as pick 3 and pick 5) — dedupe by video id, keep the
+    # first occurrence, preserve order.
+    seen = set()
+    deduped = []
+    for item in out:
+        if item["video_id"] in seen:
+            continue
+        seen.add(item["video_id"])
+        deduped.append(item)
+    return deduped
 
 
 def resolve_query(query: str, audio_only: bool = False) -> dict:
@@ -145,12 +200,12 @@ def resolve_query(query: str, audio_only: bool = False) -> dict:
     if _is_youtube_url(q):
         target = validate_youtube_url(q)
         cmd = ["yt-dlp", "--dump-single-json", "--no-download", "--no-playlist",
-               "--", target]
+               *_YT_PLAYER_CLIENT_ARGS, *_cookies_args(), "--", target]
     else:
         if "://" in q or q.lower().startswith("http"):
             raise ValueError("only YouTube URLs are allowed; use a search query otherwise")
         cmd = ["yt-dlp", "--dump-single-json", "--no-download", "--no-playlist",
-               "--", f"ytsearch1:{q}"]
+               *_YT_PLAYER_CLIENT_ARGS, *_cookies_args(), "--", f"ytsearch1:{q}"]
     res = _run_yt_dlp(cmd, timeout=60)
     try:
         data = json.loads(res.stdout)
@@ -213,9 +268,24 @@ def download(url_or_query: str, audio_only: bool, out_dir: str | None = None) ->
         url = resolve_query(s, audio_only=audio_only)["url"]
     req_dir = Path(out_dir) if out_dir else (ROOT / "data" / "downloads" / uuid.uuid4().hex)
     req_dir.mkdir(parents=True, exist_ok=True)
-    fmt = "bestaudio[ext=m4a]/bestaudio" if audio_only else "best[height<=480][ext=mp4]/best[height<=480]"
+    # v1.1: the Android player client serves NO audio-only format —
+    # only the combined format 18 (mp4 640x360, AAC) plus storyboards
+    # (verified live: 4 formats, no bestaudio). So the audio selector
+    # must fall back to `best` (format 18) and let --extract-audio pull
+    # the audio track out of it with ffmpeg; without the /best fallback
+    # yt-dlp tries the web client instead and dies on the bot-check.
+    # Same for video: a final /best fallback beats a bot-check death.
+    fmt = "bestaudio[ext=m4a]/bestaudio/best" if audio_only else "best[height<=480][ext=mp4]/best[height<=480]/best"
     out = str(req_dir / "%(title).50s.%(ext)s")
-    cmd = ["yt-dlp", "--no-playlist", "--max-filesize", "50M", "--no-thumbnail", "--no-subs",
+    # v1.1: --no-thumbnail and --no-subs were REMOVED in newer yt-dlp
+    # (requirements.txt pins >=2026.7.4, unbounded above; the Docker
+    # image installs the latest). Passing them makes yt-dlp die with
+    # "no such option" before ANY network request — that is why BOTH
+    # taps failed live while search (no such flags) worked. Neither
+    # flag does anything anyway: thumbnails/subs are only written when
+    # --write-thumbnail/--write-subs is given.
+    cmd = ["yt-dlp", "--no-playlist", "--max-filesize", "50M",
+           *_YT_PLAYER_CLIENT_ARGS, *_cookies_args(),
            "-f", fmt, "-o", out, "--print", "after_move:filepath"]
     if audio_only:
         cmd += ["--extract-audio", "--audio-format", "mp3"]

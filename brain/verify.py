@@ -102,6 +102,60 @@ def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[b
     return ok, cleaned
 
 
+def _contains_any(normalised: str, markers) -> bool:
+    """Substring match with markers normalised the same way as the text,
+    so a list entry written with ة/ى still matches."""
+    return any(normalize_arabic(m) in normalised for m in markers)
+
+
+# v1.1 voice check (research method #4, docs/research-persona-methods.md
+# §6.2): the prompt can fail and the reply comes out polite / Fusha /
+# apologetic — the exact v1.0 failure (opinion challenge answered by
+# restating the theory). Pure regex, no LLM call. Returns a list of
+# flags; [] means the reply sounds like Bahgat. The handler regenerates
+# once on flags, then sends the best and logs them.
+_APOLOGY_MARKERS = ["آسف", "أعتذر", "متأسف", "عذراً"]
+_SOFTENING_MARKERS = ["كنت بهزر", "بهزر معاك", "مش قصدي"]
+_RESTATEMENT_OPENERS = [
+    "النظرية بتقول", "النظرية تقول", "دي نظرية بتقول", "باختصار",
+]
+_ANGRY_MARKERS = [
+    "احا", "وسخ", "معرص", "معفن", "حمار", "غبي", "خول", "عرص", "زبر",
+]
+# The angry-turn check exempts only the DISTINCTIVE lazma: "تمام" /
+# "خلاص" / "يا عم" are so common they appear in polite replies too, so
+# they must not exempt an angry turn from the flag.
+_STRONG_LAZMA_MARKERS = [
+    "والله العظيم", "لا لا", "اسمع", "بقولك", "بقول لك",
+]
+
+
+def voice_check(reply: str, mood: int = 0) -> list[str]:
+    """Flags for a reply that does not sound like Bahgat. [] = pass."""
+    flags = []
+    t = normalize_arabic(reply or "")
+    if _contains_any(t, FUSHA) or _contains_any(t, _APOLOGY_MARKERS):
+        flags.append("fusha_or_apology")
+    if any(b in (reply or "") for b in BANNED):
+        flags.append("ai_phrase")
+    # The v1.0 failure opened "بحس يا سيدي، دي نظريه بتقول..." — the
+    # restatement sits mid-sentence, so this is a substring match, not
+    # a startswith. Only runs on just_chat/voice turns (the handler
+    # excludes search-grounded replies), where reporting the theory
+    # instead of a stance is the failure.
+    if _contains_any(t, _RESTATEMENT_OPENERS):
+        flags.append("polite_restatement")
+    if _contains_any(t, _SOFTENING_MARKERS):
+        flags.append("soft_ending")
+    if (
+        (mood or 0) >= 70
+        and not _contains_any(t, _ANGRY_MARKERS)
+        and not _contains_any(t, _STRONG_LAZMA_MARKERS)
+    ):
+        flags.append("angry_turn_came_out_polite")
+    return flags
+
+
 def split_message(text: str, limit: int = 4000) -> list[str]:
     if len(text) <= limit:
         return [text]

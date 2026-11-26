@@ -1,4 +1,121 @@
 # Changelog
+## 2026-11-26 — v1.1 live-test fixes + Bahgat reply bank (persona)
+
+Seif's live test of v1.0 in the group (screen recording 18:05–18:10
+EET) + his verdict: "مش حاسس اني بتكلم مع بهجت، مش بيتكلم زيه، مش
+بيقول لزماته، ومش اجريسف زيه" — and his idea: memorized replies from
+Bahgat's most famous videos, disrespectful like him. **Correction
+from Seif 18:24 EET: BOTH YouTube download taps FAIL live — video
+AND audio — with "فشل التنزيل هات لينك تاني". The media-player bar
+in the video was NOT a successful download.** Downloads are the top
+priority of this version.
+
+**Root causes (all from the code, confirmed against the video
+frames):**
+- Bug 1 — downloads died before any network request: `download()`
+  passed `--no-thumbnail` and `--no-subs` to yt-dlp, both REMOVED
+  in newer yt-dlp (the pinned range `>=2026.7.4` installs the
+  latest; 2026.11.23 has only `--no-write-thumbnail` /
+  `--no-write-subs`). yt-dlp exited with "no such option:
+  --no-thumbnail" on every tap, video and audio, while search
+  (which never passed those flags) worked. Reproduced in the VM.
+- Bug 2 — even with the flags fixed, the player/format step hits
+  YouTube's bot-check on a datacenter IP. Fix: Android player
+  client (`--extractor-args youtube:player_client=android`, the
+  same bypass that worked for the training downloads) on
+  `download()` and `resolve_query()`; format selectors now fall
+  back to `best` (Android serves only format 18 + storyboards,
+  no audio-only format) and the audio path uses
+  `bestaudio[ext=m4a]/bestaudio/best` with ffmpeg extraction.
+  Verified end-to-end in the VM (video 5.07 MB, audio mp3 3.40 MB)
+  — Cloady has no MITM proxy so odds there are better, but ONLY
+  Seif's live test can confirm. If it still fails, the fallback is
+  a cookies file from a THROWAWAY Google/YouTube account (never
+  Seif's own — his cookies file stays off the host; see
+  docs/YOUTUBE_COOKIES.md). The code path (`YT_COOKIES_FILE`) is
+  built; no cookies file is on the host, no account was created,
+  Seif has not approved either cookies route.
+- Bug 3 — the failure path hid the cause: `_run_yt_dlp` returned
+  the first 300 chars of stderr (usually SSL/progress warnings).
+  Now `_pick_error_detail()` prefers the last ERROR line, the
+  callback logs the real error, and the OWNER gets a short
+  classified hint (bot-check / too large / no format / unavailable
+  / bad settings / timeout).
+- Bug 4 — bare "هات مروان موسي" asked a confused question: the
+  "هات" guard sent a non-media remainder to the classifier and a
+  bare artist name is non-media → just_chat. Now a short bare
+  artist name (≤3 words, no question, no non-media noun) after
+  "هات"/"هاتلي" goes to YouTube; "هات ملخص" still falls through.
+- Bug 5 — opinion challenge restated the theory: no stance
+  instruction in the prompt, no opinion example, no opinion
+  handling. Now `looks_like_opinion_ask()` + a stance line in
+  SYSTEM_BASE + an 8th few-shot pair + a user-role stance note in
+  the handler; PROMPT_VERSION 6.3.
+- Bug 6 — "قول نكته" (6:09 PM) and "قول اهلا في فويس نوت"
+  (6:10 PM) never produced a voice note. THREE holes: (a)
+  `_try_send_voice` had a single synthesis attempt — any failure
+  fell back to text with only a log line; now retried once (2
+  attempts) with per-attempt logging; (b) a FAILED attempt still
+  recorded the 5-minute voice cooldown — the cooldown is now
+  recorded ONLY on success; (c) the "قول" prefix itself was
+  vetoed by the voice-words guard ("فويس" in the remainder made
+  `detect_prefix_mode` return None, so `voice_only` was False and
+  the turn sent text first + trailing voice) — the "قول" branch
+  now runs before that guard, which stays for "دور"/"هات" only;
+  (d) the unknown-retry search fired on voice turns, so the
+  6:10 PM request came back as `_SEARCH_EMPTY` text — voice
+  intents are now excluded from both unknown-retry branches.
+  A "قول" that still doesn't go out as voice is now VISIBLE: the
+  text fallback carries "الصوت مش راضي يطلع دلوقتي" (failed) or
+  "الصوت استنى شوية" (cooldown), short replies only.
+- Correction — the pick-list "duplicate": the frames show NO
+  duplicate. "النظام" (3:40) and "EL 3NWAN" (2:58) are different
+  songs; the apparent double was EL 3NWAN at different positions
+  in two separate renderings of the الخلاصه list (6:07 vs 6:08
+  PM). The video-id dedupe in `search_query()` stays as a
+  defensive fix (ytsearch can return true duplicates), tested,
+  but it is not a confirmed live bug.
+- Observation, no fix — the 6:10 PM text joke ended with a mild
+  dig at the owner by name ("دمك تقيل يا سيف"). The bank's joke
+  lines name nobody, so the bank path avoids this instance; the
+  LLM path still relies on the prompt's owner rule.
+
+**Persona (Part B):** research in docs/research-persona-methods.md
+(27 sources; ranked: reply bank first, Style RAG second, structured
+prompt third, post-generation voice check fourth — fine-tuning
+blocked on free tier, logit bias unsupported by Groq/Gemini).
+New `persona/bahgat/reply_bank.yaml`: 36 lines from Bahgat's OWN
+transcripts (8 videos, 4,562 segments), 22 verbatim / 11 cleaned /
+3 approximate, source video marked per line; family insults
+deliberately dropped (only person-only insults banked). New
+`brain/reply_bank.py` fast-path (insulted > joke > opinion >
+challenge > greeting; owner never served an insult/challenge line;
+insult comebacks only when the insult targets the bot; opinion
+lines topic-gated; rotation never repeats within 5) checked BEFORE
+the LLM, no quota/LLM/bubble. Prompt rewritten (PROMPT_VERSION
+6.3, 872 chars): behaviour-as-verbs, agenda, challenge line,
+anti-softening, lazma as calibration not quota. New
+`brain/verify.py::voice_check()` + one regeneration for replies
+that come out polite/Fusha/apologetic/restating. Full dynamic
+Style RAG is deferred to v1.2.
+
+**What changed:** `brain/intent.py` (bare artist, opinion
+detection, قول prefix order), `brain/prompt.py` (6.3, stance, 8
+examples), `brain/reply_bank.py` (new), `brain/verify.py`
+(voice_check), `tools/youtube.py` (dedupe, download repair,
+cookies path, error detail), `tg/handlers.py` (bank fast-path,
+opinion note, voice retry/cooldown/notes, voice-check regen,
+download error hints), `persona/bahgat/examples.md` (8th pair),
+`persona/bahgat/reply_bank.yaml` (new),
+`docs/research-persona-methods.md` (new),
+`docs/YOUTUBE_COOKIES.md` (new), `.env.example`
+(`YT_COOKIES_FILE`), `.gitignore` (cookies files),
+`tests/test_v11_fixes.py` (new, 26 tests).
+
+**Tests:** 341 passed (315 baseline + 26 new), py_compile + ruff
+clean, secret audit clean, no training data staged. Commit local
+only — NOT pushed (no token in context).
+
 ## 2026-11-26 — v1.0 router rework: fast chat, bubble only for slow work, prefix modes
 
 Seif's request (phone video 07:32–07:35 EET): "انا حاسس ان الموضوع معقد
