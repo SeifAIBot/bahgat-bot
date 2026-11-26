@@ -175,7 +175,11 @@ async def test_status_edited_into_error_when_llm_raises(settings, memory_fakes, 
         application=SimpleNamespace(
             bot_data={"settings": settings, "router": RaisingRouter(), "yt_requests": {}}))
     user = FakeUser(999, first_name="Test")
-    msg = FakeMessage("بهجت عامل ايه", -1005812444791, user)
+    # v1.0: "بهجت عامل ايه" is a fast-path greeting now (no LLM, no
+    # bubble), so the LLM-raises case uses a real question instead —
+    # and a plain-chat turn never starts a bubble, so the error goes
+    # out as a normal message, not as an edited bubble.
+    msg = FakeMessage("بهجت اشرحلي الدايرة الكهربائية بشتغل ازاي", -1005812444791, user)
     update = SimpleNamespace(
         update_id=100, effective_message=msg, effective_user=user,
         effective_chat=FakeChat(-1005812444791), my_chat_member=None,
@@ -183,12 +187,8 @@ async def test_status_edited_into_error_when_llm_raises(settings, memory_fakes, 
     # on_group_message catches turn errors itself (logs them) — the turn
     # "fails" internally, so assert on the observable behaviour instead.
     await h.on_group_message(update, ctx)
-    # The bubble went up for the turn…
-    assert len(bot.sent) == 1
-    # …and v0.9 edits it into the in-character error line instead of
-    # deleting it — and no second message is sent.
-    status_msg = bot.sent[0][2]
-    assert status_msg.delete.await_count == 0
-    assert any("حصلت مشكلة تقنية" in c.args[0]
-               for c in status_msg.edit_text.await_args_list)
-    msg.reply_text.assert_not_called()
+    # No bubble went up for a plain-chat turn…
+    assert len(bot.sent) == 0
+    # …so the in-character error line goes out as a normal message.
+    msg.reply_text.assert_called_once()
+    assert "حصلت مشكلة تقنية" in msg.reply_text.await_args.args[0]

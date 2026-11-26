@@ -1,5 +1,79 @@
 # Changelog
-## 2026-11-26 — v0.9 search one-turn + edit-in-place status + YouTube download fix
+## 2026-11-26 — v1.0 router rework: fast chat, bubble only for slow work, prefix modes
+
+Seif's request (phone video 07:32–07:35 EET): "انا حاسس ان الموضوع معقد
+عليه في التفرقه بين التدوير علي الانترنت و التدوير علي اليوتيوب و الكلام
+العادي… عايزين مود ل البحث عن الانترنت و مود ل فيديوهات و صوت اليوتيوب
+و مود الكلام العادي يكون اسرع شويه" — plus his own design idea (07:51
+EET): start a sentence with **"دور"** → internet search, **"هات"** →
+YouTube, **"قول"** → voice note. **The modes question, answered in one
+line: no modes UI and no slash commands — the router does it.** The
+three prefixes are deterministic tier-1 routing (hybrid routing:
+rules first, classifier for the ambiguous tail — see
+docs/research-intent-routing.md §§1, 6); normal chat is unchanged, and
+anything that implies a mode without the prefix word still routes to
+that mode.
+
+**Root causes (all from the code, confirmed against the video):**
+- Bug 1 — "شكرا يا بهجت" ran a full LLM turn behind a "بفكر يا عم،
+  استنى…" bubble: `_run_llm_turn` (tg/handlers.py) started the status
+  bubble unconditionally for ALL intents, and there was no fast path
+  for trivial chat — every "شكرا"/"تمام"/"اهلا" paid a model call.
+- Bug 2 — "دورلي علي اغنية مروان موسي الخلاصه" got no pick-list:
+  `detect_intent` (brain/intent.py) classified it as `search`, not
+  `youtube` — "دورلي" was in `_SEARCH_WORDS` and "اغنيه" alone was not
+  a YouTube trigger — so the song ran a web search instead of YouTube.
+- Latent bug, same class as v0.9: `_has()` matched *raw* keyword
+  strings against normalised text, so list entries written with ى/ة
+  (e.g. "دور على", "على النت") could never match — verified:
+  `_has("دور علي", ["دور على"])` was False. And the YouTube search
+  itself got the raw message ("دورلي علي اغنية مروان موسي الخلاصه
+  @Bahgoti_bot") as its ytsearch query, request words and all.
+
+**What changed:**
+- `brain/intent.py` — `_has()` normalises the keywords too (the
+  duplicate spellings are gone); new media-noun + request-verb rule
+  ("دورلي علي اغنية" → youtube, "دورلي علي حادثة" → search; bare
+  "اغنية"/"تراك"/"فيديو" + short message → youtube, a question about
+  a song is not); "هاتلي"/"جبلي"/"نزل" are no longer standalone
+  YouTube triggers (they are request verbs — "هاتلي ملخص" is a summary,
+  "نزل سعر الدولار" is a price question; they only fire with a media
+  noun). New `detect_fast_reply()` — instant Bahgat-voiced canned
+  replies for greetings/thanks/acks/laughter/bare "بهجت" (≤3 words,
+  no question, no insult, no apology, mood < 70). New
+  `detect_prefix_mode()` — "دور" → search, "هات" → YouTube,
+  "قول"/"قولي" → voice, checked first in `detect_intent()`, with
+  guards: empty remainder, question remainder ("دور مين؟" is "whose
+  turn?", not a search), media noun after "دور" (a song request),
+  non-media remainder after "هات" ("هات ملخص" is a summary), and voice
+  still outranks every prefix ("هات فيديو بصوتك" → voice).
+- `tg/handlers.py` — fast path at the top of `_run_llm_turn`: no quota
+  consumed, no LLM call, no bubble, no search; mood + history still
+  updated. The status bubble is created always but `start()`ed only
+  for search/youtube intents (new lazy `ensure_started()` for the
+  unknown-retry search); plain chat LLM turns get the typing indicator
+  only. YouTube query smoothing (`_yt_query` strips request words,
+  trigger, @mention, media nouns; `_yt_query_retry` retries once with
+  query + "اغنية" on 0 results); the pick-list header and stored state
+  use the winning query. A "دور" prefix query is self-contained — it
+  never gets the follow-up topic inheritance. "قول" prefix: the reply
+  goes out as a voice note *instead of* text (new `_try_send_voice`
+  helper), with the text as fallback if synthesis/send fails. Voice is
+  the current Edge TTS voice — RVC is NOT wired yet.
+- Tests: new `tests/test_router_v10.py` (exact video phrases + prefix
+  phrases + normalisation + smoothing + handler-level fast-path and
+  voice-only tests); `tests/test_status_ux_v08.py` error test updated
+  to the new bubble contract (plain-chat error = normal message, no
+  bubble); `tests/test_cache_quota_v06.py` quota tests switched from
+  greeting probes to real questions (greetings take the fast path now).
+  Full suite: 315 tests pass, py_compile + ruff clean.
+- Docs: `docs/research-intent-routing.md` (§§1–5: layered/cascade
+  routing, fast paths, Arabic normalisation, YouTube robustness,
+  status indicators; §6: the prefix layer + hybrid-routing verdict).
+
+**Untouched:** v0.9 one-turn search, edit-in-place status, no deletes,
+quota/pacing/persona/insult rules, voice training files.
+
 
 Seif's exact request (video, test group 03:24–03:27 EET): "عايز لما اقوله
 يدور علي النت و يقولي استني بفكر النتيجه تطلع في نفس الرساله بتاعت

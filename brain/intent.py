@@ -33,42 +33,158 @@ def normalize_arabic(text: str) -> str:
 
 
 def _has(text: str, words) -> bool:
-    return any(re.search(rf"(?<!\w){re.escape(w)}(?!\w)", text) for w in words)
+    # v1.0: normalize the KEYWORDS too, not just the message. Before this,
+    # a list entry written with ى/ة could never match: the text "دور على"
+    # normalizes to "دور علي", so the raw entry "دور على" was dead weight
+    # (verified live: _has("دور علي", ["دور على"]) was False). Normalizing
+    # both sides is the standard rule (Larkey et al. SIGIR 2002; see
+    # docs/research-intent-routing.md §3) and makes duplicate spellings
+    # in the lists unnecessary.
+    return any(
+        re.search(rf"(?<!\w){re.escape(normalize_arabic(w))}(?!\w)", text)
+        for w in words
+    )
+
+
+def _content_words(text: str) -> list[str]:
+    """Words of a normalised message with the trigger tokens removed
+    ("بهجت" and @mentions) — used to judge how much *content* a short
+    message carries (bare "بهجت اغنية الخلاصه" is a song request, bare
+    "بهجت" is not)."""
+    t = re.sub(r"@\w+", " ", text or "")
+    t = re.sub(r"(?<!\w)بهجت(?!\w)", " ", t)
+    return re.sub(r"\s+", " ", t).strip().split() if t.strip() else []
 
 
 # All patterns below are written in NORMALISED form (e.g. "علي" not "على",
-# "النتيجه" not "النتيجة") because matching runs on normalised text.
+# "النتيجه" not "النتيجة") because matching runs on normalised text — and
+# since v1.0 _has() normalises the keywords too, so a list entry written
+# with ى/ة still matches (the old "دور على" duplicate is gone: it
+# normalises to "دور علي").
 _VOICE_WORDS = ["بصوتك", "قولها بصوت", "فويس", "ابعت فويس", "قولي بصوتك"]
 _YOUTUBE_WORDS = [
     "هات فيديو", "هاتي فيديو", "هات اغنيه", "هاتي اغنيه",
-    "هاتلي", "هاتيلي", "جبلي", "شغلي", "شغل", "نزل", "نزلي",
+    # v1.0: "هاتلي"/"جبلي"/"نزل" were standalone triggers here, but they
+    # are request verbs, not media — "هاتلي ملخص" is a summary request,
+    # "نزل سعر الدولار" is a price question. They live in
+    # _YOUTUBE_VERBS now and only fire with a media noun (media+verb
+    # rule below). "شغل" stays standalone: "شغل X" means play X.
+    "شغل", "شغلي",
     "عايز اغنيه", "عاوز اغنيه", "عايز فيديو", "عاوز فيديو",
 ]
+# v1.0: media nouns + request verbs. The bare word "دورلي" is a *search*
+# verb ("دورلي علي حادثة الوراق" -> search), so it only means YouTube
+# when a media noun is present ("دورلي علي اغنية مروان موسي الخلاصه").
+# Bare media mentions ("بهجت اغنية الخلاصه", "تراك مروان موسي") also
+# count as YouTube when the message is short and not a question —
+# naming a track at the bot is a request to play it. ال-prefixed forms
+# included: "الاغنيه" must match too, or "دورلي علي الاغنية" misses.
+_YOUTUBE_MEDIA = [
+    "اغنيه", "الاغنيه", "تراك", "التراك", "فيديو", "الفيديو",
+    "كليب", "الكليب", "موسيقي", "الموسيقي", "صوت", "الصوت",
+]
+_YOUTUBE_VERBS = [
+    "دورلي", "دور لي", "هاتلي", "هاتيلي", "هات لي", "جبلي", "شغل",
+    "شغلي", "اسمع", "نزل", "نزلي", "عايز", "عاوز", "دور", "جيب",
+]
+# Question markers: a message asking ABOUT a song ("ايه رايك في اغنية
+# مروان موسي") is a question for the LLM, not a play request — the
+# bare-media rule below must not fire on it.
+_QUESTION_MARKERS = [
+    "؟", "ايه", "رايك", "مين", "ليه", "ازاي", "امتى", "فين", "كام", "بكام",
+]
+_BARE_MEDIA_MAX_WORDS = 4
 _SEARCH_WORDS = [
-    "دور علي", "دور على", "دورلي", "ابحث", "ايه هو", "مين هو", "اخبار", "خبر",
+    "دور علي", "دورلي", "ابحث", "ايه هو", "مين هو", "اخبار", "خبر",
     "سعر", "النتيجه", "مين بهجت", "مين كسب", "كسب مين", "كام", "امتى", "فين",
     "بكام", "ايه اللي حصل", "ايه الحصل", "ايه حصل", "سيرش", "علي النت",
-    "على النت", "حادثه", "عايز اعرف", "عاوز اعرف",
+    "حادثه", "عايز اعرف", "عاوز اعرف",
 ]
 # v0.9: "سيرش على النت على حادثة الوراق" missed every keyword above
 # (no "سيرش", no "على النت", no "حادثه") and fell through to just_chat,
 # so no search ran before the first LLM call and the bot answered with
-# a "هدورلك" promise instead of a result. Note the normaliser does NOT
-# map على -> علي, so both spellings of "على النت" are listed.
+# a "هدورلك" promise instead of a result. v1.0: _has() now normalises
+# the keywords too, so the "دور على"/"على النت" duplicates are gone.
 
 
 def detect_intent(text: str) -> str:
     t = normalize_arabic(text or "")
     low = t.lower()
+    # v1.0: deterministic prefix layer first (Seif's design) — "دور"
+    # search, "هات" YouTube, "قول" voice. See detect_prefix_mode.
+    prefix = detect_prefix_mode(text)
+    if prefix is not None:
+        return prefix[0]
     if _has(t, _VOICE_WORDS):
         return "voice"
     if "youtu.be" in low or "youtube.com" in low:
         return "youtube"
     if _has(t, _YOUTUBE_WORDS):
         return "youtube"
+    # v1.0: media noun + request verb ("دورلي علي اغنية ..." is YouTube,
+    # "دورلي علي حادثة ..." is search — the verb alone cannot decide).
+    # A short bare media mention with no question in it is also a play
+    # request ("بهجت اغنية الخلاصه"); a question about a song is not.
+    if _has(t, _YOUTUBE_MEDIA):
+        if _has(t, _YOUTUBE_VERBS):
+            return "youtube"
+        if len(_content_words(t)) <= _BARE_MEDIA_MAX_WORDS and not _has(t, _QUESTION_MARKERS):
+            return "youtube"
     if _has(t, _SEARCH_WORDS):
         return "search"
     return "just_chat"
+
+
+# --- v1.0 prefix layer (Seif's design) --------------------------------------
+# Deterministic mode prefixes, checked FIRST, before the keyword
+# classifier: "دور" -> search, "هات" -> YouTube, "قول"/"قولي" -> voice.
+# This is tier 1 of hybrid routing (rules first for unambiguous
+# triggers, classifier for the ambiguous tail — see
+# docs/research-intent-routing.md §5). The message may start with the
+# trigger "بهجت" (or an @mention) before the prefix word. Matching is
+# word-boundary + normalised, so "دورلي" is NOT the "دور" prefix and
+# "الدور" is not either.
+#
+# Guards (a prefix must not force a wrong mode):
+# - empty remainder ("دور" alone) -> fall through to the classifier;
+# - question remainder ("دور مين؟" is "whose turn?", not a search) ->
+#   fall through;
+# - media noun after "دور" ("دور اغنية مروان موسي" is a song request,
+#   not a web search) -> fall through (the classifier's media+verb
+#   rule routes it to YouTube);
+# - non-media remainder after "هات" ("هات ملخص" is a summary, not a
+#   video) -> fall through (the classifier routes it, e.g. to search
+#   via "حادثه").
+def detect_prefix_mode(text: str) -> tuple[str, str] | None:
+    """Return (mode, remainder) when the message starts with a mode
+    prefix, else None. The remainder is the normalised text after the
+    prefix word, ready to use as a search / YouTube query — for a
+    prefix search it is self-contained and must NOT get the follow-up
+    topic inheritance (_search_query) applied to it."""
+    words = _content_words(normalize_arabic(text or ""))
+    if not words:
+        return None
+    first, rest = words[0], words[1:]
+    if not rest:
+        return None
+    rest_s = " ".join(rest)
+    if _has(rest_s, _QUESTION_MARKERS):
+        return None
+    # Voice beats every prefix: "هات فيديو بصوتك" is a voice request,
+    # not a YouTube search (the classifier's voice > youtube priority).
+    if _has(rest_s, _VOICE_WORDS):
+        return None
+    if first == "دور":
+        if _has(rest_s, _YOUTUBE_MEDIA):
+            return None
+        return ("search", rest_s)
+    if first == "هات":
+        if _has(rest_s, _YOUTUBE_MEDIA):
+            return ("youtube", rest_s)
+        return None
+    if first in ("قول", "قولي"):
+        return ("voice", rest_s)
+    return None
 
 
 _INSULT_RE = re.compile(
@@ -91,6 +207,90 @@ _PRAISE_WORDS = ["شكرا", "انت جامد", "بحبك", "عاش", "براف�
 
 def looks_like_praise(text: str) -> bool:
     return _has(normalize_arabic(text or ""), _PRAISE_WORDS)
+
+
+# --- v1.0 fast path: trivial chat -------------------------------------------
+# Research (docs/research-intent-routing.md §2): even classifier-based
+# production bots keep a regex fast path for "obvious greetings", and
+# predictable messages get canned replies — no model call, no quota, no
+# status bubble. The live trigger: "شكرا يا بهجت" ran a full LLM turn
+# with a "بفكر يا عم، استنى…" bubble for a thank-you.
+#
+# Guard rails (deliberately narrow — a false positive here answers a
+# real question with a canned line):
+# - short only (<= 3 content words after the trigger is stripped);
+# - no question mark; no insult; no apology ("خلاص انا اسف" is a real
+#   forgiveness turn, not a template — the LLM handles it);
+# - calm mood only (mood >= 70: an angry Bahgat does not sweetly say
+#   "العفو" — the LLM handles it);
+# - the caller must already have checked just_chat + no grudge.
+_TRIVIAL_MAX_WORDS = 3
+_FAST_MOOD_MAX = 70
+_FAST_THANKS = ("شكرا", "تسلم", "مشكور", "تشكر")
+_FAST_GREETINGS = (
+    "اهلا", "اهلين", "السلام عليكم", "صباح الخير", "مساء الخير",
+    "هاي", "هلا", "ازيك", "عامل ايه", "ازيكم", "مرحبا",
+    "صباح النور", "مساء النور",
+)
+_FAST_ACK = ("تمام", "ماشي", "اوكي", "اوك", "طيب", "حاضر", "خلاص", "اوكيه")
+_FAST_REPLIES = {
+    "thanks": ["العفو يا عم، ده واجبي.", "ماشي يا سيدي، انت تؤمر.",
+               "على إيه يا عم، ده أقل حاجة."],
+    "greeting": ["أهلاً يا عم، زي الفل؟", "تمام يا عم، انت عامل ايه؟",
+                 "أيوه يا عم، جايبلي ايه النهارده؟"],
+    "ack": ["تمام يا عم.", "ماشي يا سيدي.", "خلاص يا عم، فهمت."],
+    "laugh": ["ههههههه", "هههههههه"],
+    "bare": ["أيوه يا عم؟", "نعم يا سيدي؟"],
+}
+
+
+def _fast_pick(kind: str, seed: str) -> str:
+    """Deterministic-ish variant pick: rotates every 30 minutes so the
+    same user saying "شكرا" twice does not get the identical line twice
+    in a row forever, but stays stable inside one test run window.
+    Tests should assert membership in _FAST_REPLIES[kind], not a
+    specific variant."""
+    import time
+    import zlib
+
+    variants = _FAST_REPLIES[kind]
+    bucket = int(time.time() // 1800)
+    idx = zlib.crc32(f"{seed}|{bucket}".encode("utf-8")) % len(variants)
+    return variants[idx]
+
+
+def detect_fast_reply(text: str, mood: int = 30) -> str | None:
+    """Instant local reply for trivial chat, or None when the turn needs
+    the LLM. Never raises; returns None on any doubt — a missed fast
+    path only costs one LLM call, a wrong one answers a real question
+    with a canned line."""
+    if mood is not None and mood >= _FAST_MOOD_MAX:
+        return None
+    t = normalize_arabic(text or "")
+    if not t or "؟" in t or "?" in t:
+        return None
+    if looks_like_insult(text):
+        return None
+    words = _content_words(t)
+    if not words:
+        return _fast_pick("bare", t)
+    if len(words) > _TRIVIAL_MAX_WORDS:
+        return None
+    s = " ".join(words)
+    # Apologies are real turns (forgiveness), never templates.
+    if "اسف" in s or "معلش" in s:
+        return None
+    if re.fullmatch(r"ه{2,}", s):
+        return _fast_pick("laugh", t)
+    for kind, patterns in (
+        ("thanks", _FAST_THANKS),
+        ("greeting", _FAST_GREETINGS),
+        ("ack", _FAST_ACK),
+    ):
+        for p in patterns:
+            if s == p or s.startswith(p + " "):
+                return _fast_pick(kind, t)
+    return None
 
 
 UNKNOWN_MARKERS = [

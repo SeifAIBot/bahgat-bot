@@ -355,7 +355,10 @@ async def test_handler_group_quota_reply_differs(handler_env, settings, tmp_db, 
         quota_cfg=None: (False, "group daily limit reached"), raising=False)
     router = FakeRouter()
     ctx = _ctx(settings, router)
-    msg = FakeMessage("بهجت ازيك يا عم", -100222, user)
+    # v1.0: greetings ("بهجت ازيك يا عم", "بهجت عامل ايه") take the fast
+    # path now and never reach the quota check — a real question is the
+    # right probe for a quota reply.
+    msg = FakeMessage("بهجت ايه رايك في مروان موسي", -100222, user)
     await h._on_group_message_inner(make_update(msg, user, -100222, update_id=331), ctx)
     assert len(router.calls) == 0
     assert any("الجروب خلص حصته" in t for t in _sent_texts(msg))
@@ -365,7 +368,7 @@ async def test_handler_group_quota_reply_differs(handler_env, settings, tmp_db, 
         lambda u, c, owner_id=None, capacity_replies=None, active_users=None,
         quota_cfg=None: (False, "fair share reached"), raising=False)
     h._last_reply_time.clear()
-    msg2 = FakeMessage("بهجت عامل ايه", -100222, user)
+    msg2 = FakeMessage("بهجت ايه رايك في الكورة", -100222, user)
     await h._on_group_message_inner(make_update(msg2, user, -100222, update_id=332), ctx)
     assert any("كفاية كده النهاردة" in t for t in _sent_texts(msg2))
 
@@ -389,7 +392,7 @@ async def test_handler_low_pool_notice_once_per_hour(
     # mode was already cheap, so there is no new transition.
     h._last_reply_time.clear()
     h._last_cooldown_notice.clear()
-    msg2 = FakeMessage("بهجت عامل ايه", -100222, user)
+    msg2 = FakeMessage("بهجت ايه رايك في الكورة", -100222, user)
     await h._on_group_message_inner(make_update(msg2, user, -100222, update_id=342), ctx)
     assert len(router.calls) == 2
     assert not any("البطارية" in t for t in _sent_texts(msg2))

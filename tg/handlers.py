@@ -97,7 +97,7 @@ from brain import intent as _intent_mod
 from brain import memory as _memory
 from brain import mood as _mood_mod
 from brain import prompt as _prompt_mod
-from brain.intent import detect_intent, looks_like_insult, looks_stalling, looks_unknown
+from brain.intent import detect_fast_reply, detect_intent, detect_prefix_mode, looks_like_insult, looks_stalling, looks_unknown
 from brain.memory import add_message, get_member, recent_messages, save_member
 from brain.mood import update_mood
 from brain.prompt import build_system_prompt, temperature_for
@@ -823,6 +823,32 @@ async def _send_text(msg, text: str):
                 raise
 
 
+async def _try_send_voice(msg, context, chat_id, reply: str) -> bool:
+    """Synthesize + send one voice note (Edge TTS for now — RVC is not
+    wired yet). True on success, False on any failure; never raises,
+    so the caller can fall back to text."""
+    try:
+        from tools.voice import synthesize
+
+        try:
+            await context.bot.send_chat_action(chat_id, "record_voice")
+        except Exception:
+            pass
+        ogg = await asyncio.wait_for(synthesize(reply), timeout=15)
+        try:
+            with open(ogg, "rb") as f:
+                await msg.reply_voice(voice=f)
+        finally:
+            try:
+                os.unlink(ogg)
+            except Exception:
+                pass
+        return True
+    except Exception as e:
+        logger.warning("voice failed: %s", e)
+        return False
+
+
 async def _send_final(msg, status, text: str):
     """Send the final reply of a turn (v0.9): the first chunk EDITS the
     status bubble into the answer — the result lands in the same
@@ -935,6 +961,8 @@ class _StatusMessage:
         return self._msg.message_id if self._msg is not None else None
 
     async def start(self):
+        if self._msg is not None or self._dead or self._finalized:
+            return
         try:
             self._msg = await self._bot.send_message(
                 self._chat_id, status_line(self._stage, self._frame),
@@ -944,6 +972,14 @@ class _StatusMessage:
             self._dead = True
             return
         self._spin_task = asyncio.create_task(self._spin())
+
+    async def ensure_started(self):
+        """Start the bubble lazily — for a just_chat turn whose unknown
+        retry runs a search mid-turn. No-op when it already started,
+        failed, or was finalised. v1.0: plain chat turns never call
+        this, so they never show a bubble."""
+        if self._msg is None and not self._dead and not self._finalized:
+            await self.start()
 
     async def _edit(self, text: str, parse_mode=None, reply_markup=None):
         if self._msg is None or self._dead:
@@ -1350,6 +1386,77 @@ def _parse_pick_callback(data: str):
     """'yt:pick:2' -> 2; anything else -> None."""
     m = re.fullmatch(r"yt:pick:(\d+)", data or "")
     return int(m.group(1)) if m else None
+
+
+# --- YouTube query smoothing (v1.0) ----------------------------------------
+# The raw user text is a bad ytsearch query: it carries the request
+# words ("دورلي علي", "عايز"), the trigger ("بهجت"), the @mention and
+# the media noun ("اغنية"). yt-dlp searches the whole string, so
+# "دورلي علي اغنية مروان موسي الخلاصه @Bahgoti_bot" ranks worse than
+# the bare "مروان موسي الخلاصه". Strip by word on the ORIGINAL text
+# (spelling preserved) but match on the normalised form. The leading
+# "علي" is only stripped at the start ("علي مروان موسي" -> the
+# preposition, not the artist); a mid-query "علي" is kept
+# ("اغنية علي الحجار" keeps its artist).
+_YT_STRIP_PHRASES = [
+    "دورلي علي", "دور لي علي", "دور علي", "دورلي", "دور لي",
+    "هاتلي", "هات لي", "هاتيلي", "هات", "هاتي", "جبلي", "شغل", "شغلي", "اسمع",
+    "نزل", "نزلي", "عايز", "عاوز", "ممكن",
+]
+_YT_STRIP_WORDS = {
+    "اغنيه", "الاغنيه", "تراك", "التراك", "فيديو", "الفيديو",
+    "كليب", "الكليب", "موسيقي", "الموسيقي", "صوت", "الصوت",
+    "بهجت", "يا", "عم",
+}
+
+
+def _yt_query(text: str) -> str:
+    """Smooth a YouTube request into a bare artist+title query.
+    Falls back to the raw text (minus @mentions) when stripping would
+    leave nothing — e.g. a bare "اغنية" with no title."""
+    raw = re.sub(r"@\w+", " ", text or "")
+    words = raw.split()
+    if not words:
+        return (text or "").strip()
+    norm = [_normalize(w) for w in words]
+    phrases = sorted(
+        (tuple(_normalize(p).split()) for p in _YT_STRIP_PHRASES),
+        key=len, reverse=True,
+    )
+    kept = []
+    i = 0
+    while i < len(words):
+        matched = False
+        for ph in phrases:
+            if norm[i:i + len(ph)] == list(ph):
+                i += len(ph)
+                matched = True
+                break
+        if matched:
+            continue
+        if norm[i] in _YT_STRIP_WORDS:
+            i += 1
+            continue
+        kept.append(words[i])
+        i += 1
+    # A leftover leading "علي" is NOT stripped here: it is more likely
+    # part of a name ("علي الحجار") than a stray preposition — the
+    # phrase-level stripping above ("دورلي علي", "دور علي") already
+    # handles the preposition in the common constructions.
+    # "" when stripping leaves nothing (a bare "دورلي علي اغنية" with no
+    # title): the caller answers "مفيش حاجة بالاسم ده" instead of
+    # searching the raw request words.
+    return " ".join(kept)
+
+
+def _yt_query_retry(query: str) -> str:
+    """Second-attempt variant for a 0-result search (Rhapsod's
+    shortened-query retry, adapted): appending "اغنية" helps YouTube's
+    music ranking disambiguate the track. "" when there is no useful
+    variant left (the query already says اغنية)."""
+    if not query or _normalize(query).endswith("اغنيه"):
+        return ""
+    return f"{query} اغنية"
 
 
 async def _search_youtube(query: str, limit: int = _YT_PICK_MAX) -> list[dict]:
@@ -1780,6 +1887,14 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     # yet. A cache hit returns here: no quota consumed, no router call, but
     # mood + history are still updated so the conversation stays coherent.
     intent_early = detect_intent(text)
+    # v1.0 prefix layer (Seif's design): detect_prefix_mode returns the
+    # mode + the remainder after the prefix word. detect_intent already
+    # applies the prefix; the remainder is needed here as the query
+    # base — a prefix search ("دور حادثة الوراق") is self-contained, so
+    # it must NOT get _search_query's follow-up topic inheritance.
+    _prefix = detect_prefix_mode(text)
+    prefix_mode = _prefix[0] if _prefix else None
+    prefix_rest = _prefix[1] if _prefix else None
     insulted_early = looks_like_insult(text)
     praised_early = _looks_like_praise(text)
     member_early = get_member(user.id)
@@ -1790,6 +1905,29 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     cache_eligible = (
         intent_early == "just_chat" and not insulted_early and not grudge_early
     )
+    # v1.0 fast path: trivial chat (greetings, thanks, acks, laughter,
+    # bare "بهجت") gets an INSTANT local reply in Bahgat's voice — no
+    # quota consumed, no LLM call, no status bubble, no search. The live
+    # trigger was "شكرا يا بهجت" running a full LLM turn behind a
+    # "بفكر يا عم، استنى…" bubble. Mood + history are still updated and
+    # the reply is still recorded, so the conversation stays coherent.
+    # Pacing still applies (the outer pipeline waits before this turn),
+    # and the reply timestamp is still recorded when it is sent.
+    if cache_eligible:
+        fast = detect_fast_reply(text, mood_early)
+        if fast is not None:
+            member_early["username"] = user.username or ""
+            member_early["first_name"] = user.first_name or ""
+            member_early["mood"] = mood_early
+            save_member(member_early)
+            add_message(chat_id, user.id, "user", text)
+            add_message(chat_id, context.bot.id, "assistant", fast)
+            logger.info(
+                "fast_path=true intent=just_chat mood=%s user_id=%s chat_id=%s",
+                mood_early, user.id, chat_id,
+            )
+            await _send_text(msg, fast)
+            return
     if cache_eligible:
         cached = _get_cached_reply(norm_early, intent_early, bucket_early)
         if cached:
@@ -1849,11 +1987,17 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
 
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
-    # v0.8: one live status bubble for the turn. v0.9: it is EDITED into
-    # the final reply (or the error line when the turn raises) — never
-    # deleted, so the chat never shows a "Deleted message" tombstone.
+    # v1.0: the status bubble is for SLOW work only (search, YouTube,
+    # download — operations that take seconds). Plain chat LLM turns
+    # get the typing indicator only; the fast path gets neither. Before
+    # this, every turn opened a "بفكر يا عم، استنى…" bubble — including
+    # a thank-you — which is exactly what Seif showed in the video
+    # ("بقوله شكرا اعد يفكر"). The bubble object still exists for every
+    # turn (so _send_final / the error path need no None checks); it is
+    # just not sent until slow work actually starts.
     status = _StatusMessage(context.bot, chat_id, reply_to_message_id=msg.message_id)
-    await status.start()
+    if intent_early in ("search", "youtube"):
+        await status.start()
     try:
         # History BEFORE inserting current message (v0.6: 6, was 8).
         history_rows = recent_messages(chat_id, limit=6)
@@ -1882,6 +2026,10 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
 
         intent = intent_early
         if intent == "youtube":
+            # v1.0: the bubble starts here for YouTube turns (plain chat
+            # never starts it); ensure_started is a no-op when the
+            # bubble already went up at the top of the turn.
+            await status.ensure_started()
             await status.set_stage("youtube")
             # A pasted YouTube URL resolves straight to the choice view
             # (old behaviour); a text query searches up to 5 results.
@@ -1890,7 +2038,20 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 await _send_yt_choice(msg, context, chat_id, user, text, resolved, status=status)
                 add_message(chat_id, context.bot.id, "assistant", "عايزها فيديو ولا صوت بس؟")
                 return
-            results = await _search_youtube(text)
+            # v1.0: the raw text is a bad ytsearch query (request words,
+            # trigger, @mention, media noun). Smooth it to artist+title
+            # first; one retry with a simplified variant on 0 results.
+            # The pick-list header and the stored state use the query
+            # that actually won, not the raw message. When the "هات"
+            # prefix fired, the remainder is already the bare query.
+            yt_query = _yt_query(prefix_rest if prefix_mode == "youtube" else text)
+            results = await _search_youtube(yt_query) if yt_query else []
+            if not results:
+                retry_q = _yt_query_retry(yt_query)
+                if retry_q:
+                    results = await _search_youtube(retry_q)
+                    if results:
+                        yt_query = retry_q
             if not results:
                 await _send_final(msg, status, "دورت يا عم ومفيش حاجة بالاسم ده، جرب اسم تاني.")
                 add_message(chat_id, context.bot.id, "assistant", "دورت ومفيش حاجة.")
@@ -1899,7 +2060,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 # Single hit: skip the list, straight to the choice view.
                 resolved = dict(results[0])
                 resolved["approx_size"] = None
-                await _send_yt_choice(msg, context, chat_id, user, text, resolved, status=status)
+                await _send_yt_choice(msg, context, chat_id, user, yt_query, resolved, status=status)
                 add_message(chat_id, context.bot.id, "assistant", "عايزها فيديو ولا صوت بس؟")
                 return
             # Pick-list: header + numbered titles, one button per result.
@@ -1907,7 +2068,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             # becomes the list message); only when the bubble never went
             # up is a normal reply sent instead. The state key is that
             # message's id either way.
-            list_text = _pick_list_text(text, results)
+            list_text = _pick_list_text(yt_query, results)
             list_kb = _pick_list_keyboard(results)
             if await status.finalize(list_text, reply_markup=list_kb):
                 list_msg_id = status.message_id
@@ -1917,7 +2078,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             context.application.bot_data.setdefault("yt_requests", {})[
                 (chat_id, list_msg_id, user.id)
             ] = {
-                "query": text,
+                "query": yt_query,
                 "results": results,
                 "expires_at": time.time() + _YT_TTL,
             }
@@ -1930,8 +2091,15 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             # Search runs BEFORE the first LLM call for search intents.
             # v0.7e: the query inherits the conversation topic for short
             # follow-ups ("ايه الحصل" -> "...حادثة الوراق ايه الحصل").
+            # v1.0: a "دور" prefix query is self-contained ("دور حادثة
+            # الوراق" means search exactly that) — use the remainder
+            # directly, never the follow-up inheritance.
+            await status.ensure_started()
             await status.set_stage("searching")
-            search_text = await _search_grounding(_search_query(text, history))
+            if prefix_mode == "search" and prefix_rest:
+                search_text = await _search_grounding(prefix_rest)
+            else:
+                search_text = await _search_grounding(_search_query(text, history))
             search_ran = bool(search_text) and not search_text.startswith("[SEARCH FAILED]")
             await status.set_stage("thinking")
 
@@ -1963,6 +2131,10 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         unanswered = looks_unknown(reply) or looks_stalling(reply)
         reply_is_fallback = False
         if unanswered and not search_ran and intent != "search":
+            # v1.0: a just_chat turn that needs a search starts the
+            # bubble here (it never went up for plain chat) — slow work
+            # is what the bubble is for.
+            await status.ensure_started()
             await status.set_stage("searching")
             search_text2 = await _search_grounding(_search_query(text, history))
             await status.set_stage("thinking")
@@ -2045,29 +2217,23 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         voice_key = (chat_id, user.id)
         if use_voice and time.time() - _last_voice.get(voice_key, 0) < _VOICE_COOLDOWN:
             use_voice = False
-        # Text first, then voice (whole short reply or none — never split).
-        # v0.9: the text EDITS the status bubble into the answer.
-        await _send_final(msg, status, reply)
-        if use_voice:
+        # v1.0 "قول" prefix: voice INSTEAD of text. Voice goes first;
+        # the text is only the fallback when synthesis/send fails, so
+        # the user still gets the answer. Every other turn keeps the
+        # old order — text first (edits the bubble into the answer),
+        # voice after (whole short reply or none, never split).
+        voice_only = prefix_mode == "voice"
+        voice_sent = False
+        if voice_only and use_voice:
             _last_voice[voice_key] = time.time()
-            try:
-                from tools.voice import synthesize
-
-                try:
-                    await context.bot.send_chat_action(chat_id, "record_voice")
-                except Exception:
-                    pass
-                ogg = await asyncio.wait_for(synthesize(reply), timeout=15)
-                try:
-                    with open(ogg, "rb") as f:
-                        await msg.reply_voice(voice=f)
-                finally:
-                    try:
-                        os.unlink(ogg)
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning("voice failed, text already sent: %s", e)
+            voice_sent = await _try_send_voice(msg, context, chat_id, reply)
+        if not (voice_only and voice_sent):
+            # Text first, then voice (whole short reply or none — never split).
+            # v0.9: the text EDITS the status bubble into the answer.
+            await _send_final(msg, status, reply)
+        if not voice_only and use_voice:
+            _last_voice[voice_key] = time.time()
+            await _try_send_voice(msg, context, chat_id, reply)
     except RetryAfter:
         # Rate limit: never send a fallback message (it would 429 too).
         raise
