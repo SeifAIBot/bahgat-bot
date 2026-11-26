@@ -47,8 +47,8 @@
 # - op-05 and op-30 are blocked from serving in brain/reply_bank.py
 #   (_BLOCKED_IDS): both are "I don't know" hedges — prefer searching.
 #
-# COUNTS: 205 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 32, joke_request 10, opinion_asked 35, roast 40, search_fetch 3, thanks 1
-# SERVED: 193 (205 minus 10 approximate minus 2 blocked hedges op-05/op-30).
+# COUNTS: 214 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 40, joke_request 10, opinion_asked 35, roast 41, search_fetch 3, thanks 1
+# SERVED: 202 (214 minus 10 approximate minus 2 blocked hedges op-05/op-30).
 # v1.3: insulted 8 -> 15 raw (7 -> 14 served); verbatim 50 -> 51, cleaned 117 -> 123.
 # User-submitted ingest (2026-11-26, Seif via the "قاموس شتايم بهجت" page): +21 lines — insulted 15 -> 32 raw
 # (14 -> 31 served), roast 36 -> 40 raw (35 -> 39 served). Confidence `user`: owner-authored lines, NOT
@@ -56,6 +56,11 @@
 # lines dropped: "يا حبيبي يا مصر يا مصر يا حبيبتي يا مصر يا مصر" (patriotic chant) and
 # "قووم يا مصري مش هنتحايل عليك" (rallying line) — neither fits an insult pool — and "مصممممممص"
 # (single-word exclamation: breaks the bank's no-one-word-padding rule, and duplicates in-30's "مصمص").
+# User-submitted ingest round 2 (2026-11-26, Seif via the "قاموس شتايم بهجت" page): +9 lines — insulted 32 -> 40 raw
+# (31 -> 39 served), roast 40 -> 41 raw (39 -> 40 served). All 9 member-safe (no family line this round);
+# the feminine-addressed comeback in-38 ("انتي ست... يا وليه") is served at whoever insults the bot —
+# gender gating is out of scope (same as ro-23). No new lines dropped: all 9 are insults, none
+# one-word, none near-duplicates. Page total now 33 lines (24 round 1 + 9 round 2).
 #
 
 entries:
@@ -591,6 +596,78 @@ entries:
     member_safe: true
     notes: Seif-submitted comeback — exasperated "may God deal with you". Person-only.
 
+  # ---- v1.5 user-submitted ingest: 8 more comebacks (served 31 -> 39) ----
+  # Seif wrote these himself via the "قاموس شتايم بهجت" page, 2026-11-26 (round 2).
+  # Owner-authored (confidence: user, source: user-submitted) — NOT Bahgat
+  # transcript lines. All person-only, member-safe: the insulted target is
+  # always the sender (a member), so no family-insult line may land here.
+  # in-38 is feminine-addressed ("انتي... يا وليه") — gender gating is out
+  # of scope; it is served at whoever insults the bot, same as ro-23.
+  - id: in-33
+    trigger: insulted
+    line: بطلب منك ممكن انيك حضرتك
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — mock-polite "may I please fuck you, sir". Person-only.
+
+  - id: in-34
+    trigger: insulted
+    line: ايه الشرمطه دي
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "what is this sluttiness", reacting to the insulter. Person-only.
+
+  - id: in-35
+    trigger: insulted
+    line: انتا ياض خول يالا ، انتا ياض خول ما تخلي عندك شخصيه
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — direct second-person insult, "have some personality". Person-only.
+
+  - id: in-36
+    trigger: insulted
+    line: اخرررررص اخررررررص يا كس الكلب
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "shut up" volley. Person-only.
+
+  - id: in-37
+    trigger: insulted
+    line: رد يالااااااااا رد يالا زي الجاموس
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "answer, you buffalo". Person-only.
+
+  - id: in-38
+    trigger: insulted
+    line: انتي ست متربيتيش عيب احترمي نفسك ، احتررررمي نفسك يا وليه احترمي نفسك يا وليه
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — feminine-addressed ("انتي... يا وليه"); served at whoever insults
+      the bot, gender gating out of scope (same as ro-23). Person-only.
+
+  - id: in-39
+    trigger: insulted
+    line: دي اسمها شرمطه دي يا استاذ الحالة الانتا فيها دي اسمها شرمطه و منيكه
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — "this is called sluttiness, sir, the state you are in". Person-only.
+
+  - id: in-40
+    trigger: insulted
+    line: ده انا زوبرجي من صغري يا بيبي
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted comeback — boastful "I have been a cock-man since I was young, baby". Person-only.
+
   # ---- roast on request (NEW v1.2) — roasting a named person/group ----
   - id: ro-01
     trigger: roast
@@ -974,6 +1051,20 @@ entries:
     member_safe: false
     notes: Seif-submitted roast, marked "للبرّه بس" by him on the page — family insult ("ولاد الزنا"),
       hence tagged non-member-only. Never served at a group member.
+
+  # ---- v1.5 user-submitted ingest: 1 more generic roast (served 39 -> 40) ----
+  # Seif wrote this himself via the "قاموس شتايم بهجت" page, 2026-11-26 (round 2).
+  # Owner-authored (confidence: user, source: user-submitted) — NOT a Bahgat
+  # transcript line. Generic (no `target:`) so it fits any roast target.
+  # Plural greeting-style mockery ("welcome, fuckers") — loosest fit in the
+  # pool, kept because it IS a person-directed insult; no greeting pool exists.
+  - id: ro-41
+    trigger: roast
+    line: اهلا اهلا ب المنايك اهلا اهلا مرحب مرحب مرحب بيكو
+    source: user-submitted
+    confidence: user
+    member_safe: true
+    notes: Seif-submitted roast — plural greeting-style mockery. Generic, person-only.
 
   # ---- someone asks his opinion ----
   - id: op-01

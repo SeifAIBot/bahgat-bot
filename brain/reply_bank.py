@@ -1,4 +1,4 @@
-"""Bahgat reply bank — v1.2 retrieval fast-path (205 entries).
+"""Bahgat reply bank — v1.2 retrieval fast-path (214 entries).
 
 Bahgat's REAL lines (persona/bahgat/reply_bank.yaml, built from his own
 transcripts — never invented) served verbatim for the highest-frequency

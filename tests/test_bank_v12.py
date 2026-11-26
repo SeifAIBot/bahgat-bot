@@ -2,6 +2,8 @@
 v1.3: insulted 7 -> 14 served (184 entries total).
 v1.4 user-submitted ingest (Seif, insults page): +21 lines — insulted
 14 -> 31 served, roast 35 -> 39 served (205 entries total).
+v1.5 user-submitted ingest round 2 (Seif, insults page): +9 lines — insulted
+31 -> 39 served, roast 39 -> 40 served (214 entries total).
 triggers, member_safe tagging for family-insult lines (Seif's rule change
 2026-11-26 19:15 EET: family insults allowed, but NEVER at group members),
 target-aware verify filter, fail-safe insult-level resolution.
@@ -63,11 +65,11 @@ def test_bank_v12_counts():
         "joke_request", "dismiss", "challenge", "search_fetch",
         "roast", "condolence",
     }
-    assert sum(len(v) for v in bank.values()) == 193
+    assert sum(len(v) for v in bank.values()) == 202
     assert {k: len(v) for k, v in bank.items()} == {
-        "catchphrase": 24, "greeting": 4, "insulted": 31,
+        "catchphrase": 24, "greeting": 4, "insulted": 39,
         "opinion_asked": 31, "joke_request": 10, "dismiss": 15,
-        "challenge": 36, "search_fetch": 2, "roast": 39,
+        "challenge": 36, "search_fetch": 2, "roast": 40,
         "condolence": 1,
     }
     # Every entry has source + trigger + confidence marking.
@@ -76,7 +78,7 @@ def test_bank_v12_counts():
     raw = yaml.safe_load(open(
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
-    assert len(raw) == 205
+    assert len(raw) == 214
     for e in raw:
         assert e["id"] and e["trigger"] and e["line"] and e["source"]
         assert e["confidence"] in ("verbatim", "cleaned", "approximate", "user")
@@ -117,7 +119,7 @@ def test_bank_no_near_duplicate_generic_insults():
 
 def test_roast_member_target_gets_person_only_lines():
     safe = _roast_lines(member_safe_only=True)
-    assert len(safe) == 26  # 39 served roast - 13 served family lines
+    assert len(safe) == 27  # 40 served roast - 13 served family lines
     for _ in range(30):
         line = match_reply_bank(
             "يا بهجت اشتم محمد", chat_id=CHAT_ID, target_is_member=True)

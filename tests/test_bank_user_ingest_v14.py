@@ -7,6 +7,12 @@ lines (confidence "user", source "user-submitted") are served like
 verbatim/cleaned; they are never presented as Bahgat transcript lines.
 Targeting tags are enforced: member-safe lines are person-only, the
 one outsiders-only family line (ro-40) never serves at a group member.
+
+Round 2 (v1.5, same day): Seif added 9 more lines on the page; all 9
+were banked (8 insulted comebacks in-33..in-40, 1 generic roast ro-41),
+so the aggregate counts in this file moved (user 21 -> 30, insulted
+served 31 -> 39, roast served 39 -> 40, generic roast 15 -> 16). The
+round-1 accounting below (SUBMITTED = 24, BANKED = 21) is unchanged.
 """
 from pathlib import Path
 
@@ -91,35 +97,35 @@ def test_all_submitted_lines_accounted_for():
 def test_user_lines_honest_attribution_and_ids():
     raw = _raw()
     user = [e for e in raw if e.get("confidence") == "user"]
-    assert len(user) == 21
-    assert {e["line"] for e in user} == set(BANKED)
+    assert len(user) == 30  # 21 round 1 + 9 round 2 (v1.5)
+    assert set(BANKED) <= {e["line"] for e in user}
     for e in user:
         assert e["source"] == "user-submitted"
         # Explicit member_safe tag on every user line (never an omission).
         assert e.get("member_safe") in (True, False)
     assert {e["id"] for e in user if e["trigger"] == "insulted"} == {
-        f"in-{i:02d}" for i in range(16, 33)
+        f"in-{i:02d}" for i in range(16, 41)
     }
     assert {e["id"] for e in user if e["trigger"] == "roast"} == {
-        "ro-37", "ro-38", "ro-39", "ro-40",
+        "ro-37", "ro-38", "ro-39", "ro-40", "ro-41",
     }
 
 
 def test_user_insulted_lines_are_member_safe():
     bank = load_bank()
-    assert len(bank["insulted"]) == 31
+    assert len(bank["insulted"]) == 39
     user_insulted = [e for e in bank["insulted"]
                      if e.get("confidence") == "user"]
-    assert len(user_insulted) == 17
+    assert len(user_insulted) == 25
     assert all(e.get("member_safe") is True for e in user_insulted)
 
 
 def test_user_roast_lines_generic_and_tagged():
     bank = load_bank()
-    assert len(bank["roast"]) == 39
+    assert len(bank["roast"]) == 40
     user_roast = [e for e in bank["roast"]
                   if e.get("confidence") == "user"]
-    assert len(user_roast) == 4
+    assert len(user_roast) == 5
     # Generic (no target:) so they fit any roast target.
     assert all(e.get("target") is None for e in user_roast)
     by_id = {e["id"]: e for e in user_roast}
@@ -130,25 +136,34 @@ def test_user_roast_lines_generic_and_tagged():
 
 
 def test_family_user_line_never_served_to_members(monkeypatch):
-    # Deterministic: choice = last eligible line in file order.
-    # ro-40 is the last roast entry, so a non-member target reaches it;
-    # a member target must never see it (last eligible is ro-39 then).
+    # The family line must never serve at a member (or unresolved
+    # target), but must stay reachable for a resolved non-member.
+    # Deterministic check for the member side (choice = last eligible):
+    # ro-41 (v1.5) is the last roast entry now and is member-safe, so
+    # the member pick is never the family line.
     monkeypatch.setattr(rb.random, "choice", lambda xs: xs[-1])
-    assert match_reply_bank(
-        "يا بهجت اشتم محمد", chat_id=CHAT_ID,
-        target_is_member=False) == FAMILY_LINE
     assert match_reply_bank(
         "يا بهجت اشتم محمد", chat_id=CHAT_ID,
         target_is_member=True) != FAMILY_LINE
     assert match_reply_bank(
         "يا بهجت اشتم محمد", chat_id=CHAT_ID,
         target_is_member=None) != FAMILY_LINE
+    # Non-member reachability: sample many draws; the family line
+    # must appear (it is in the non-member pool).
+    monkeypatch.undo()
+    seen = {
+        match_reply_bank(
+            "يا بهجت اشتم محمد", chat_id=CHAT_ID,
+            target_is_member=False)
+        for _ in range(200)
+    }
+    assert FAMILY_LINE in seen
 
 
 def test_user_roast_lines_reachable_for_any_target():
     generic = {e["line"] for e in load_bank()["roast"]
                if e.get("target") is None}
-    assert len(generic) == 15
+    assert len(generic) == 16
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = {
             match_reply_bank(text, chat_id=CHAT_ID, target_is_member=False)

@@ -1,4 +1,10 @@
 # Changelog
+## 2026-11-26 — v1.5: ingest Seif's submitted insults, round 2
+
+Seif added 9 more insult lines on the "قاموس شتايم بهجت" page (page total now 33: 24 round 1 + 9 round 2). All 9 were banked: 8 insulted comebacks (in-33..in-40, served 31 → 39) and 1 generic roast (ro-41, served 39 → 40). Bank total 205 → 214 raw entries (202 served). All 9 are member-safe (no family line this round — the detector flags none of them, verified independently); nothing was dropped this round — all 9 are insults, none one-word, none near-duplicates. Caveat, flagged not fixed: in-38 is feminine-addressed ("انتي ست... يا وليه") and is served at whoever insults the bot — gender gating is out of scope (same as ro-23). The round-1 dropped lines ("يا حبيبي يا مصر…", "قووم يا مصري…", "مصممممممص") stay out.
+
+**Verified:** 451 tests pass (446 baseline + 5 new in tests/test_bank_user_ingest_v15.py), py_compile + ruff clean.
+
 ## 2026-11-26 — v1.4: ingest Seif's submitted insults into the reply bank
 
 Seif wrote 24 insult lines on the "قاموس شتايم بهجت" page. 21 were banked: 17 insulted comebacks (in-16..in-32, served 14 → 31) and 4 generic roasts (ro-37..ro-40, served 35 → 39). Bank total 184 → 205 raw entries (193 served). New confidence level `user` for owner-authored lines (source: user-submitted) — served like verbatim/cleaned, never presented as Bahgat transcript lines; only `approximate` is never served. All user lines carry an explicit `member_safe` tag; the one outsiders-only family line (ro-40, "يا ولاد الزنوه احترمو عقولنا", Seif marked it "للبرّه بس") is `member_safe: false` and can only serve at resolved non-member targets. Dropped 3 lines: "يا حبيبي يا مصر…" (patriotic chant) and "قووم يا مصري…" (rallying line) — not insults, no pool fits them; "مصممممممص" — single-word exclamation, breaks the bank's no-one-word-padding rule and duplicates in-30's "مصمص".
