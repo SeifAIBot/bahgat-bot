@@ -22,3 +22,6 @@ __pycache__/
 training/raw/
 training/work/
 training/samples/
+training/clean/
+training/curated/
+training/transcripts/

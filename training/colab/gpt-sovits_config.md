@@ -21,15 +21,15 @@ independent GPT-SoVITS v2/v4 guides, Colab free-tier limit surveys (Nov 2026).
 | Install | `pip install -r requirements.txt` then `pip install -r extra-req.txt --no-deps` |
 | Python | 3.10–3.12 supported (repo badge) — Colab's 3.12 is fine. |
 
-## Version choice: v2, not v4
+## Version choice: v2Pro, not v2 or v4
 
 | Version | Fine-tune VRAM | Output | Verdict for free Colab |
 |---|---|---|---|
-| **v2 (chosen)** | 6 GB min / 8 GB recommended | 32 kHz | Fits a free T4 (15 GB usable) with headroom |
-| v2Pro | ~v2 | 32 kHz | Same ballpark; v2 is the most documented path |
+| **v2Pro (chosen)** | ~8–10 GB | 32 kHz | Fits a free T4 (15 GB usable) with headroom; best for low-quality recordings |
+| v2 | 6 GB min / 8 GB recommended | 32 kHz | Older, most-documented path — superseded by v2Pro for this project |
 | v3 | 8 GB min | 48 kHz | Heavier; metallic artifacts reported, superseded by v4 |
 | v4 | 8 GB min / **16 GB recommended** | 48 kHz, LoRA rank 32 | Marginal on a 15 GB T4 — not recommended on free tier |
-| v5 | newer, less documented for fine-tuning | — | Skip for now |
+| v5 | newer, less documented for fine-tuning | — | Skip for now (Oct 2026, in code only, **no tagged release**, untested for fine-tuning, no Arabic) |
 
 ## ⚠️ Arabic caveat (the reason this is the fallback)
 
@@ -64,7 +64,7 @@ The notebook prints the downloaded layout so you can verify before training.
 
 ## Dataset
 
-Same dataset as RVC (`bahgat_dataset.zip`), but **transcripts are mandatory**.
+Same dataset as RVC (`bahgat_dataset_curated.zip` — 361 clips, 38.11 min, 48 kHz), but **transcripts are mandatory** — and the curated zip contains **no per-clip transcripts**. Supply per-clip `.txt` files (same basename as each WAV) or a combined `{basename: text}` JSON before running §4, or skip §4.
 `.list` format, one line per clip:
 
 ```
@@ -106,10 +106,10 @@ python GPT_SoVITS/s1_train.py --config_file TEMP/tmp_s1.yaml
 | SoVITS (s2) | Batch size | **4** | Safe on a 15 GB T4 (WebUI default is 4 for s2); raise only if VRAM headroom is confirmed |
 | SoVITS (s2) | Save every | 2 epochs | Checkpoints at 2/4/6/8 for picking the best by ear |
 | SoVITS (s2) | `training_files` / `validation_files` | `TEMP/bahgat.list` (both) | Same-list validation, as the WebUI does |
-| SoVITS (s2) | Pretrained | `s2Gv2Pro.14000.pth` / `s2Dv2Pro.14000.pth` | v2 base weights |
+| SoVITS (s2) | Pretrained | `s2Gv2Pro.14000.pth` / `s2Dv2Pro.14000.pth` | v2Pro base weights |
 | GPT (s1) | Epochs | **15** | WebUI default for fine-tuning |
 | GPT (s1) | Batch size | **4** | Safe on a 15 GB T4 |
-| GPT (s1) | Pretrained | `s1bert25hz-5kh-longer-epoch=12e-step=369668.ckpt` | v2 base weights |
+| GPT (s1) | Pretrained | `s1bert25hz-5kh-longer-epoch=12e-step=369668.ckpt` | v2Pro base weights |
 | Both | Exp name / speaker | `bahgat` | Single-speaker fine-tune |
 
 No manual train/val split is needed: GPT-SoVITS uses the `.list` for training
@@ -117,7 +117,7 @@ No manual train/val split is needed: GPT-SoVITS uses the `.list` for training
 
 ## GPU / time (free Colab T4, 15 GB usable VRAM)
 
-- v2 fine-tuning: 6 GB min / 8 GB recommended → fits the T4.
+- v2Pro fine-tuning: ~8–10 GB → fits the T4.
 - Expected wall time, ~15 min audio: setup ~10 min, prep ~5–10 min,
   SoVITS 8 epochs ~30–45 min, GPT 15 epochs ~10–20 min.
   **Total ≈ 1–1.5 h**, inside one 12 h session.
@@ -129,7 +129,7 @@ No manual train/val split is needed: GPT-SoVITS uses the `.list` for training
 | SoVITS generator | `logs/bahgat/ckpt/s2G*.pth` | **Ship this** |
 | SoVITS discriminator | `logs/bahgat/ckpt/s2D*.pth` | Training-only; include in the zip for completeness/resume |
 | GPT checkpoint | `logs/bahgat/ckpt/s1bert25hz-*-e15.ckpt` | **Ship this** |
-| Export zip | Drive: `My Drive/bahgat_voice_models/bahgat_gpt-sovits_v2_YYYYMMDD.zip` | Contains the `ckpt/` files above + a README.txt |
+| Export zip | Drive: `My Drive/bahgat_voice_models/bahgat_gpt-sovits_v2pro_YYYYMMDD.zip` | Contains the `ckpt/` files above + a README.txt |
 
 ## Resume after disconnect
 
