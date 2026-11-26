@@ -1,4 +1,5 @@
 """v1.2 bank expansion: 177 lines (36 -> 177), roast + condolence
+v1.3: insulted 7 -> 14 served (184 entries total).
 triggers, member_safe tagging for family-insult lines (Seif's rule change
 2026-11-26 19:15 EET: family insults allowed, but NEVER at group members),
 target-aware verify filter, fail-safe insult-level resolution.
@@ -60,9 +61,9 @@ def test_bank_v12_counts():
         "joke_request", "dismiss", "challenge", "search_fetch",
         "roast", "condolence",
     }
-    assert sum(len(v) for v in bank.values()) == 165
+    assert sum(len(v) for v in bank.values()) == 172
     assert {k: len(v) for k, v in bank.items()} == {
-        "catchphrase": 24, "greeting": 4, "insulted": 7,
+        "catchphrase": 24, "greeting": 4, "insulted": 14,
         "opinion_asked": 31, "joke_request": 10, "dismiss": 15,
         "challenge": 36, "search_fetch": 2, "roast": 35,
         "condolence": 1,
@@ -73,7 +74,7 @@ def test_bank_v12_counts():
     raw = yaml.safe_load(open(
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
-    assert len(raw) == 177
+    assert len(raw) == 184
     for e in raw:
         assert e["id"] and e["trigger"] and e["line"] and e["source"]
         assert e["confidence"] in ("verbatim", "cleaned", "approximate")
@@ -404,8 +405,10 @@ async def test_handler_roast_member_gets_person_only_line(
     await h.on_group_message(_v12_update(msg, user), ctx)
     msg.reply_text.assert_called_once()
     sent = msg.reply_text.await_args.args[0]
-    # First member-safe roast line in file order (ro-01/02/03 are family).
-    assert sent == "السيسي ده حيوان، حمار كداب"
+    # First member-safe GENERIC roast line in file order: ro-01/02/03 are
+    # family lines, ro-04..08 are target-specific (v1.3 targeting), so
+    # the first line that fits target محمد is ro-09.
+    assert sent == "فاشلين! فاشلين!"
 
 
 async def test_handler_roast_non_member_may_serve_family_line(

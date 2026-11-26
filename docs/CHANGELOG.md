@@ -1,4 +1,22 @@
 # Changelog
+## 2026-11-26 — v1.3 live-test fixes: insult misroute, roast targeting, savagery, download fallbacks + cookies env var
+
+Seif's live test of v1.2 in the group (screenshot 19:53–19:56 EET) + his verdict: the bot "مش اجريسف خالص" (not aggressive at all) — he wants a savage bot ("عايزه بوت متوحش"), the insults are weak/ordinary, and he wants them all varied and creative. He warned that if we cannot fix the savagery he will take the code and make it more savage himself. Three live failures in the same test: (1) "يا بهجت انتا حمار" was answered with the search-empty line; (2) "اشتم صلاح" got the incoherent roast "عاوز يغير في القرآن يا متناك؟"; (3) the YouTube download STILL fails live post-v1.1 ("يوتيوب رافض الطلب من السيرفر").
+
+**Root causes:**
+- Bug 1 — two compounding defects: `looks_like_insult()` only knew `(انت|انته)` + insult-noun, so the Egyptian spelling **انتا** was missed and the insult fast-path never fired; then the v0.9 unknown-retry (which excluded only voice intents) ran a web search on the insult turn and ended with `_SEARCH_EMPTY`. `detect_intent()` itself was innocent — it returned `just_chat`.
+- Bug 2 — the roast branch used the target name only for the member/owner gates, then picked at random from the whole 35-line pool. 25 of the 35 lines are target-specific (11 about السيسي, 4 لينا, 2 الجيش, 2 ندوش, 2 المسيحي, 1 كيسنجر, 1 كارما, 2 situational) — so a Sisi line (ro-21, "on Sisi saying Quran texts must change") could land on صلاح.
+- Bug 3 — the bot-check is intermittent and has tightened since v1.1: plain-android metadata went 0/4 in the VM; `android+player_skip=configs` was the only variant that ever downloaded (Marwan 1/2 through the new chain vs 0/5 single-variant). The no-cookies chain raises the odds but cannot guarantee a download from a flagged IP.
+
+**Fixes:**
+- Insult turns never search: "انتا" added to the insult regex; new `looks_like_insult_turn()` (insult at the bot OR roast request); an insult-turn guard in `detect_intent()` before the search check; `دور`-prefix refuses an insult remainder; BOTH unknown-retry branches gated on insult turns (gating only the first would let the `elif` fire `_SEARCH_EMPTY` with no search at all).
+- Roast targeting: new optional `target:` field on roast entries (absence = generic); `_pick()` filters to generic + subject-matching lines (aliases: بلحه/بلحة → السيسي) and returns `None` rather than a non-sequitur when nothing fits. Roast pool unchanged: 36 raw / 35 served.
+- Savagery: prompt 6.3 → 6.4 — aggression is now the default tone ("أسلوبك الافتراضي وحشي… والرد المهذب استثناء"); `voice_check()` bans service-politeness markers (`soft_polite`, always on) and flags edgeless replies on provoked turns (`soft_reply_to_provocation`, wired in the handler for insult/roast/challenge turns); insulted pool 7 → 14 served (honest ceiling from the transcripts — the rest is family insults, already-banked lines, garble, or guests' words; further growth needs Seif's own submitted insults).
+- Downloads: 5-attempt no-cookies chain (android+skip=configs → android plain → ios+skip → web+skip → android+skip with explicit format 18/bestaudio), then cookies only if configured. New `YT_COOKIES_CONTENT` env var (approved by Seif 20:03 EET, throwaway account only): the bot writes the content once to `data/youtube_cookies.txt` (0600, gitignored) and passes it to yt-dlp on the final attempt only. No account created yet, no cookies file anywhere — account creation + export is a browser job, and Seif pastes the content into Cloady himself (see docs/YOUTUBE_COOKIES.md).
+- Real bug note: the old test `test_handler_roast_member_gets_person_only_line` pinned the buggy behaviour (a السيسي line served as a roast of محمد) — updated to the correct generic line "فاشلين! فاشلين!" (ro-09). One old handler test updated for the provoked regeneration (a provoked turn with an edgeless draft now regenerates once, so 2 router calls instead of 1).
+
+**Verified:** 439 tests pass (365 baseline + 74 new), py_compile + ruff clean, VM end-to-end downloads (Rick Astley video 11.83 MB / audio mp3 3.71 MB; Marwan video 5.07 MB once, then all-5-attempts bot-check on the retry). Live confirmation still needed: 🎬/🎵 taps from Cloady, with and without cookies.
+
 ## 2026-11-26 — v1.1 live-test fixes + Bahgat reply bank (persona)
 
 Seif's live test of v1.0 in the group (screen recording 18:05–18:10

@@ -44,7 +44,9 @@
 # - op-05 and op-30 are blocked from serving in brain/reply_bank.py
 #   (_BLOCKED_IDS): both are "I don't know" hedges — prefer searching.
 #
-# COUNTS: 177 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 8, joke_request 10, opinion_asked 35, roast 36, search_fetch 3, thanks 1
+# COUNTS: 184 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 15, joke_request 10, opinion_asked 35, roast 36, search_fetch 3, thanks 1
+# SERVED: 172 (184 minus 10 approximate minus 2 blocked hedges op-05/op-30).
+# v1.3: insulted 8 -> 15 raw (7 -> 14 served); verbatim 50 -> 51, cleaned 117 -> 123.
 #
 
 entries:
@@ -367,6 +369,78 @@ entries:
     notes: 'Raw [5614.10 - 5619.56] "يا محمد خرى / يا محمد خرى" (twice). Attribution uncertain: in the محمد
       shouting match, could be Bahgat or Lina. Approximate — never serve without verification.'
 
+  # ---- v1.3 insulted expansion: 7 more comebacks (served 7 -> 14) ----
+  # Mining note (2026-11-26): the 8 transcripts are now exhausted for
+  # honest person-only comebacks. Everything else unbanked in this vein
+  # is either a family insult (can never serve at a member — the
+  # insulted target is always the sender), already banked under roast /
+  # challenge / dismiss, garbled past reconstruction, or a guest's words
+  # (e.g. christian "ناس متقلبين كذابين" is the GUEST talking to Bahgat;
+  # lina-live "وانت كافر ممحوني" is محمد insulting Bahgat — both left
+  # out). The remaining gap is Seif's own submitted insults (separate
+  # collection page) — ingest those when they land, do not pad here.
+  - id: in-09
+    trigger: insulted
+    line: لا لا يا شرموطة
+    source: lina-live_full.txt
+    confidence: verbatim
+    notes: Raw [1727.38 - 1729.38] "لا لا يا شرموطة" — Bahgat to Lina in the "حفيدتك تكون شرموطة زيك"
+      exchange. Person-only, "لا لا" lazma + direct address; distinct from ro-31/ro-32 (mock-polite
+      "يا أستاذة" forms).
+
+  - id: in-10
+    trigger: insulted
+    line: أنا بسألك إنت شرموطة
+    source: lina-live_full.txt
+    confidence: cleaned
+    notes: Raw [1735.72 - 1737.26] "انا مسألك انت شرموطة" — "مسألك" is Whisper spelling of "بسألك".
+      Bahgat to Lina, question-form mocking comeback. Person-only.
+
+  - id: in-11
+    trigger: insulted
+    line: إنت كافر ومدلس
+    source: lina-live_full.txt
+    confidence: cleaned
+    notes: Raw [5462.36 - 5469.98] "عخم امتكافر ومدلس. امتكافر ومدلس." — "عخم" dropped as garble,
+      "امتكافر" is "إنت كافر"; the repeated second "امتكافر ومدلس" collapses to one line. Bahgat firing
+      back at محمد in the shouting match. Person-only; distinct from in-07 ("إنت معرّص وكافر").
+
+  - id: in-12
+    trigger: insulted
+    line: لماذا يا سيد مدلس؟
+    source: lina-live_full.txt
+    confidence: cleaned
+    notes: Raw [5475.28 - 5481.16] "اسألني لماذا? لماذا يا سيد مدلس? اولا ايه بتمارس الضعارة" — trimmed to
+      the mock-formal address; the "اسألني لماذا" lead and the tail dropped. Bahgat to محمد. Person-only,
+      his signature mock-politeness as a comeback.
+
+  - id: in-13
+    trigger: insulted
+    line: مسلم إيه يا متناك؟
+    source: train-accident_full.txt
+    confidence: cleaned
+    notes: Raw [1085.58 - 1091.98] "الكالب يا واطية معرص. مصلم ايه يا متنك?" — the family-insult head
+      ("يا ابن الكلب") dropped; "مصلم" is Whisper garble of "مسلم", "متنك" of "متناك". Bahgat turning on
+      the sheikh mid-debate — what kind of Muslim are you. Person-only.
+
+  - id: in-14
+    trigger: insulted
+    line: إنت بتستخف بالناس
+    source: christian_full.txt
+    confidence: cleaned
+    notes: Raw [193.14 - 196.54] "باس يهديف بها ان انت تستخف بالناس" — garbled head ("باس يهديف بها")
+      dropped; the coherent core is Bahgat accusing the guest of belittling people. Same volley as banked
+      ch-27/ch-28/ch-29 (lines 180-210), so Bahgat is the speaker. Person-only, dismissive.
+
+  - id: in-15
+    trigger: insulted
+    line: لسه قحبة صغيرة غبية
+    source: lina-live_full.txt
+    confidence: cleaned
+    notes: Raw [1649.24 - 1650.94] "ومانك لسه قحب صغيره غبيه" — "ومانك" dropped as garble ("وما إنك"),
+      "قحب" is Whisper spelling of "قحبة". Bahgat to Lina, mocking her youth and sense. Person-only;
+      distinct from ro-30 (the "مهنة القحبة" question).
+
   # ---- roast on request (NEW v1.2) — roasting a named person/group ----
   - id: ro-01
     trigger: roast
@@ -384,6 +458,7 @@ entries:
     line: لا لا لا، مش زي الشرموط ابن المتنكة السيسي
     source: funny-komanda_full.txt
     confidence: cleaned
+    target: السيسي
     member_safe: false
     notes: Raw Whisper "لا لا لا مزاي الشرموط ابن المتنكة السيسي اللي بيقول العلم يعمل ايه العلمة في وطن
       بايا" (~71s) — trimmed to the insult head; the tail about "what is science for in a homeland..." was
@@ -395,6 +470,7 @@ entries:
     line: شعب ابن المتناك ده لسه بيدين بالولاء لجيش ابن المتناك ده
     source: funny-komanda_full.txt
     confidence: cleaned
+    target: الجيش
     member_safe: false
     notes: Raw Whisper "و شعب ابن المتناك ده / لسه بيدين بالولاق لي جيش ابن المتناك ده" (~874s, two adjacent
       segments) — "بالولاق" is garble of "بالولاء". Family insult, hence member_safe false. The near-identical
@@ -405,6 +481,7 @@ entries:
     line: السيسي ده حيوان، حمار كداب
     source: funny-komanda_full.txt
     confidence: cleaned
+    target: السيسي
     notes: Raw Whisper "السيس دا حيوان / حمار كذب" (~1155s, two adjacent segments) — "كذب" normalised to
       "كداب". Person-only animal insult, no family element.
 
@@ -413,6 +490,7 @@ entries:
     line: بيقولوا بنته أطول منه وأطول من مراته
     source: funny-komanda_full.txt
     confidence: cleaned
+    target: السيسي
     member_safe: false
     notes: 'Raw Whisper "يقولوا بنتو اطول منو واطول منو مراتو" (~302s) — dialect spelling normalised only.
       His mockery of Sisi family height, in the middle of the "عيلة الأقزام" bit. Tagged member_safe: false
@@ -423,6 +501,7 @@ entries:
     line: عيلة السيسي يعني عيلة الأقزام
     source: funny-komanda_full.txt
     confidence: cleaned
+    target: السيسي
     member_safe: false
     notes: 'Raw Whisper "وهو عالتو اسمع عالت السيسي / يعني عالتو الاخزام / الحصان يعني هم عالتو ومعالت اخزام"
       (~311-326s) — "عالتو" is garble of "عيلته", "الاخزام" of "الأقزام". Verify by ear; the "الحصان" (horse)
@@ -434,6 +513,7 @@ entries:
     line: ندوش العبيطة الهبلة التافهة
     source: committee-girl_full.txt
     confidence: cleaned
+    target: ندوش
     notes: Raw Whisper "ندوش العبيطة الهبلة التفهة" (~164s) — spelling normalised only ("التفهة" to "التافهة").
       His signature put-down of the committee girl by her nickname; usable as a roast of a named opponent.
       "ندوش" is Bahgat's nickname for her, not a generic word.
@@ -443,6 +523,7 @@ entries:
     line: ما تزعليش مني يا ندوش، انتي بهايم
     source: committee-girl_full.txt
     confidence: cleaned
+    target: ندوش
     notes: Raw Whisper "ما تسعليش مني يا ندوش انت بهايم" (~221s) — "تسعليش" is garble of "تزعليش". His mock-apology
       before calling her cattle.
 
@@ -459,6 +540,7 @@ entries:
     line: بيزرعوا خيار، ويربوا فراخ، ويصنعوا شوك وسكاكين
     source: funny-komanda_full.txt
     confidence: cleaned
+    target: الجيش
     notes: Raw Whisper "ولد المتنكة ما بيعمله بيزرعه خيار وفسلين. يربوا فراخ وفسلين. يصنعوا شوك وسكاكين."
       (~629-638s) — the family-insult head was dropped, the garbled "فسلين" word was dropped rather than
       guessed, and the three surviving activities were kept. His famous mockery of the army's civilian businesses.
@@ -468,6 +550,7 @@ entries:
     line: بالاتفاق مع كيسنجر الشرموط
     source: funny-komanda_full.txt
     confidence: cleaned
+    target: كيسنجر
     notes: Raw Whisper "بالاتفاق مع كسينجربن الشرموط المارس" (~840s) — "كسينجربن" is garble of "كيسنجر";
       the garbled tail "المارس" was dropped. Fragment of his claim that Sadat turned the 73 victory into
       defeat by deal with Kissinger. Person-only insult.
@@ -485,6 +568,7 @@ entries:
     line: عارف لو جبت جحش عنده إسهال هيدير البلد أحسن من السيسي
     source: lagan_full.txt
     confidence: cleaned
+    target: السيسي
     notes: Raw "عارف لو جبت جحش عنده اسهال وبيرهرت على الهوح هيدير البلد ساعت 13 سنة بتوعي سيسيده" — trimmed
       the garbled tail ("بيرهرت على الهوح", "ساعت 13 سنة بتوعي سيسيده"); the donkey image is verbatim. His
       signature creative political roast.
@@ -494,6 +578,7 @@ entries:
     line: يعني انتي بتلحسي خرى للعيال
     source: karma_full.txt
     confidence: verbatim
+    target: كارما
     notes: Exact segment; Bahgat roasting Karma about her past (licking after the kids). Person-only, situational,
       his voice. The neighbouring garbled line "يعني انت بتلحس للعال دي بيط" is the same roast, not banked
       separately.
@@ -511,6 +596,7 @@ entries:
     line: هو الحقير اللي ما بيعرفش يقرا كلمة لا بعربي ولا بإنجليزي، ولا بيفهم في العسكرية ولا المدنية
     source: sheikh_full.txt
     confidence: cleaned
+    target: السيسي
     notes: PROPOSED TRIGGER roast. Raw "وهو الحقير / بن الحقير / اللي ما بيعرفش / يقرى كلمة / بعربي ولا
       انجليزي / ولا بيفن في العسكرية / ولا المدنية" — "بن الحقير" dropped from the banked line, so no family
       insult in it; his roast of Sisi's illiteracy.
@@ -520,6 +606,7 @@ entries:
     line: هل أم إلهك زانية؟
     source: christian_full.txt
     confidence: verbatim
+    target: المسيحي
     member_safe: false
     notes: 'PROPOSED TRIGGER roast. Clean segment — Bahgat''s fierce confrontation question to the Christian
       guest. Mother referenced: member_safe false.'
@@ -529,6 +616,7 @@ entries:
     line: هل جدتها زانية؟ هل جدتها الكبرى كانت عاهرة؟
     source: christian_full.txt
     confidence: cleaned
+    target: المسيحي
     member_safe: false
     notes: 'PROPOSED TRIGGER roast. Raw "هل امها زانية? هل جدتها زانية? هل جدتها الكبرى كانت عائر?" — "عائر"
       is Whisper garble of "عاهرة". Same confrontation volley as c-33; grandmother referenced: member_safe
@@ -555,6 +643,7 @@ entries:
     line: عاوز يغير في القرآن يا متناك؟
     source: train-accident_full.txt
     confidence: cleaned
+    target: السيسي
     notes: PROPOSED TRIGGER roast. Raw "مزالة مصلم بكلم عن القرآن عوز غير في القرآن يا متنك" — on Sisi saying
       Quran texts must change. Person-only insult.
 
@@ -579,6 +668,7 @@ entries:
     line: يا رب اللي بيعرص للسيسي ربنا يبتليه بحدسة قطر
     source: train-accident_full.txt
     confidence: cleaned
+    target: السيسي
     notes: PROPOSED TRIGGER roast. Raw "يا رب اللي بيعرص بالسيسي / ربنا يبتليه / بحدسة أطريد" — his curse
       on Sisi supporters, tied to the train accident. Person-only.
 
@@ -587,6 +677,7 @@ entries:
     line: احا! عربية من سنة 1900، من قبل ما عملوا السكة الحديد يا ولاد دين الكلب
     source: train-accident_full.txt
     confidence: cleaned
+    target: حادثة القطار
     member_safe: false
     notes: PROPOSED TRIGGER roast. Raw "احا زوب عربية من سنة 1900 من قبل ما عملوا السكر الحديد يا ولاديني
       الكلب" — "زوب" dropped as garbled. Situational insult about the wrecked 1900-era train carriage. member_safe
@@ -597,6 +688,7 @@ entries:
     line: مش قادر توفر نور للناس يا ابن دين الكلب
     source: train-accident_full.txt
     confidence: cleaned
+    target: السيسي
     member_safe: false
     notes: PROPOSED TRIGGER roast. Raw "الناس بالليل وقالك ما عن ديناش دو / يا ابن ديني الكلب / مش قادر
       توفر بطريق ونور للناس" — garbled middle word dropped; on the crash site having no light at night.
@@ -616,6 +708,7 @@ entries:
     line: اغيثونا اغيثونا يا ولاد دين الكلب، يا اللي بتدعوا إنكم مسلمين
     source: train-accident_full.txt
     confidence: cleaned
+    target: السيسي
     member_safe: false
     notes: PROPOSED TRIGGER roast. Raw "اغيثونا اغيثونا يا ولادين الكالب يلا بدعوا انك مسلمين" — quoting
       Gaza's plea, turned on Sisi's supporters. member_safe false.
@@ -625,6 +718,7 @@ entries:
     line: فين الفلوس يا ابن دين الكلب؟
     source: train-accident_full.txt
     confidence: approximate
+    target: السيسي
     member_safe: false
     notes: PROPOSED TRIGGER roast. Raw "فان الفلوسياب دينا الكلب وقالت توفر" is heavily garbled — "فين الفلوس"
       is a reconstruction of the sense (where did the trillions for railway development go). Approximate;
@@ -635,6 +729,7 @@ entries:
     line: إيه الصعوبات اللي بتواجه مهنة القحبة اللي زيك؟
     source: lina-live_full.txt
     confidence: verbatim
+    target: لينا
     notes: Raw segment [1951.40 - 1955.88] "ايه صعوبات اللي بتواجه مهنة القحبة اللي زيك". Bahgat teasing
       Lina about her "profession". Same question in garbled form at [1903.80 - 1910.30].
 
@@ -643,6 +738,7 @@ entries:
     line: عادي يا أستاذة قحبة
     source: lina-live_full.txt
     confidence: cleaned
+    target: لينا
     notes: Raw [3353.38 - 3357.92] "عادي يا استاذة قاحبة. عادي." — "قاحبة" is Whisper orthography for قحبة;
       repeated "عادي" trimmed. Sarcastic polite address ("يا أستاذة") + insult, his signature mock-politeness.
 
@@ -651,6 +747,7 @@ entries:
     line: ربنا يهديك يا قحبة
     source: lina-live_full.txt
     confidence: cleaned
+    target: لينا
     notes: Raw [3343.92 - 3348.90] "يعني ربنا بنا هديك يا قاحبة" — "بنا" is garbled "يهديك"; tail ("نستفيد
       بأمن القاحبة") dropped as garbled. Sarcastic blessing to Lina.
 
@@ -659,6 +756,7 @@ entries:
     line: حفيدتك تكون شرموطة زيك
     source: lina-live_full.txt
     confidence: verbatim
+    target: لينا
     member_safe: false
     notes: 'Raw segment [1715.64 - 1718.54] "حفيدتك تكون شرموطة زيك". Bahgat taunting Lina after asking
       what she wishes for her daughter/granddaughter ("تتمنى لها تبقى ايه"). Tagged member_safe: false —
@@ -685,6 +783,7 @@ entries:
     line: اللقاء النهاردة مع قحاب
     source: lina-live_full.txt
     confidence: cleaned
+    target: ضيوف اللايف
     notes: 'Two attestations: [4858.96 - 4862.96] "معلش يا أستاذ، إحنا اللقاء مع قحاب" and [4878.26 - 4879.98]
       "أنا لقاء النهارضة مع قحاب". Bahgat announcing the live''s theme to the guest محمد. Normalized from
       both.'

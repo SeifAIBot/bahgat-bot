@@ -147,8 +147,45 @@ _STRONG_LAZMA_MARKERS = [
 ]
 
 
-def voice_check(reply: str, mood: int = 0) -> list[str]:
-    """Flags for a reply that does not sound like Bahgat. [] = pass."""
+# v1.3 soft-polite ban (the v1.2 live failure was a bot whose DEFAULT
+# register was polite-with-occasional-insults). These markers can never
+# appear in a good Bahgat reply — not in a search answer, not in a song
+# list — so they flag on EVERY turn, not only angry ones. Mock-polite
+# address ("عادي يا أستاذة قحبة", a bank line) is Bahgat's; the bare
+# service greeting ("أهلا بك") and the surrender ("عندك حق", "أنا غلطان")
+# are not. "شكرا" on its own is NOT in this list: a thanks reply is
+# fine — it is only soft under provocation (see provoked= below).
+_SOFT_POLITE_MARKERS = [
+    "بكل سرور", "يسعدني", "في خدمتك", "تحت امرك", "تحت أمرك",
+    "بكل احترام", "من فضلك", "لو سمحت", "شكرا لتواصلك",
+    "اتمني لك", "أتمنى لك", "يوم سعيد", "حاضر يا فندم",
+    "حقك عليا", "انا غلطان", "أنا غلطان", "عندك حق", "انت صح",
+    "ممكن اكون غلطان", "يمكن اكون غلطان", "اهلا بك", "مرحبا بك",
+]
+# Edge markers: Bahgat's edge is not only profanity ("احا", "حمار") and
+# the strong lazma — a dismissive stance ("نظرية فاضية", "إنت بتستخف
+# بالناس", "كذاب ومدلس") is edge too. These exempt a reply from the
+# angry-turn and provoked-turn soft flags, the same way _ANGRY_MARKERS
+# and _STRONG_LAZMA_MARKERS do.
+_EDGE_MARKERS = [
+    "فاضي", "فاضية", "هبل", "عبط", "كلام فاضي", "دماغك",
+    "اخرس", "اسكت", "غور", "كذاب", "مدلس", "افحمتك",
+    "بتستخف", "بتخرف", "بتدلس", "بتكذب",
+]
+
+
+def voice_check(reply: str, mood: int = 0, provoked: bool = False) -> list[str]:
+    """Flags for a reply that does not sound like Bahgat. [] = pass.
+
+    provoked=True is for turns where the user insulted, challenged, or
+    otherwise provoked the bot (the handler knows: looks_like_insult /
+    challenge turns). On a provoked turn a reply with no edge at all —
+    no insult, no strong lazma, no dismissive edge — is soft even at
+    low mood, so it flags "soft_reply_to_provocation". The handler does
+    not pass provoked yet (it calls voice_check(reply, mood)); wiring
+    it is a one-line follow-up there. Default False keeps every
+    existing call site's behaviour.
+    """
     flags = []
     t = normalize_arabic(reply or "")
     if _contains_any(t, FUSHA) or _contains_any(t, _APOLOGY_MARKERS):
@@ -164,12 +201,22 @@ def voice_check(reply: str, mood: int = 0) -> list[str]:
         flags.append("polite_restatement")
     if _contains_any(t, _SOFTENING_MARKERS):
         flags.append("soft_ending")
+    if _contains_any(t, _SOFT_POLITE_MARKERS):
+        flags.append("soft_polite")
     if (
         (mood or 0) >= 70
         and not _contains_any(t, _ANGRY_MARKERS)
         and not _contains_any(t, _STRONG_LAZMA_MARKERS)
+        and not _contains_any(t, _EDGE_MARKERS)
     ):
         flags.append("angry_turn_came_out_polite")
+    if (
+        provoked
+        and not _contains_any(t, _ANGRY_MARKERS)
+        and not _contains_any(t, _STRONG_LAZMA_MARKERS)
+        and not _contains_any(t, _EDGE_MARKERS)
+    ):
+        flags.append("soft_reply_to_provocation")
     return flags
 
 

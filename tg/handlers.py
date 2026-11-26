@@ -97,8 +97,8 @@ from brain import intent as _intent_mod
 from brain import memory as _memory
 from brain import mood as _mood_mod
 from brain import prompt as _prompt_mod
-from brain.intent import detect_fast_reply, detect_intent, detect_prefix_mode, looks_like_insult, looks_like_opinion_ask, looks_stalling, looks_unknown
-from brain.reply_bank import match_reply_bank
+from brain.intent import detect_fast_reply, detect_intent, detect_prefix_mode, looks_like_insult, looks_like_insult_turn, looks_like_opinion_ask, looks_stalling, looks_unknown
+from brain.reply_bank import looks_like_challenge, match_reply_bank
 from brain.memory import add_message, get_member, recent_messages, save_member
 from brain.mood import update_mood
 from brain.prompt import build_system_prompt, temperature_for
@@ -2261,7 +2261,16 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         # asked for a spoken line, not information, and the search for
         # "اهلا في فويس نوت" came back _SEARCH_EMPTY as the spoken
         # reply. Voice turns keep their first reply (spoken as voice).
-        if unanswered and not search_ran and intent not in ("search", "voice"):
+        # v1.3: the same hole, for INSULT turns (live 2026-11-26 19:53
+        # EET — "يا بهجت انتا حمار" answered with _SEARCH_EMPTY).
+        # An insult directed at the bot, or a roast request ("اشتم X"),
+        # is never an information turn: the LLM's first reply stands,
+        # no search runs, and _SEARCH_EMPTY is never produced. BOTH
+        # branches below are gated — gating only the first would let
+        # the elif fire instead and produce _SEARCH_EMPTY with no
+        # search at all (search_text is "" there, so no passages).
+        insult_turn = looks_like_insult_turn(text)
+        if unanswered and not search_ran and intent not in ("search", "voice") and not insult_turn:
             # v1.0: a just_chat turn that needs a search starts the
             # bubble here (it never went up for plain chat) — slow work
             # is what the bubble is for.
@@ -2294,7 +2303,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 reply = _SEARCH_EMPTY
                 reply_is_fallback = True
                 _record_unknown_retry(rescued=False)
-        elif unanswered and intent != "voice":
+        elif unanswered and intent != "voice" and not insult_turn:
             # Search already ran (or failed) and the reply is still
             # unanswered. When passages exist, one firm retry from the
             # grounding, then the extractive fallback; when nothing was
@@ -2334,13 +2343,18 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         # the turn involved a search (search_ran, or a citation in the
         # reply): a grounded answer legitimately reports what it found,
         # so a restatement opener there is not a persona failure.
+        # v1.3: provoked turns (insult at the bot, roast request, or
+        # challenge) also flag an edgeless reply via voice_check.
         if (
             intent in ("just_chat", "voice")
             and not reply_is_fallback
             and not search_ran
             and not re.search(r"\[\d+\]", reply)
         ):
-            _flags = voice_check(reply, member["mood"])
+            _flags = voice_check(
+                reply, member["mood"],
+                provoked=insult_turn or looks_like_challenge(text),
+            )
             if _flags:
                 logger.warning(
                     "voice check flags=%s intent=%s mood=%s user_id=%s chat_id=%s",

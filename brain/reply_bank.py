@@ -1,4 +1,4 @@
-"""Bahgat reply bank — v1.2 retrieval fast-path (177 entries).
+"""Bahgat reply bank — v1.2 retrieval fast-path (184 entries).
 
 Bahgat's REAL lines (persona/bahgat/reply_bank.yaml, built from his own
 transcripts — never invented) served verbatim for the highest-frequency
@@ -35,6 +35,16 @@ Rules, enforced here in code (never left to the prompt):
   so they only fire when the question is ABOUT السيسي / التكفير /
   الكفر / الإخوان. Serving "السيسي كافر" as the answer to a golden-
   billion question would be off-topic nonsense.
+- TARGET-SPECIFICITY (v1.3, Seif 2026-11-26): bank lines tagged
+  `target: <subject>` in the YAML fire ONLY when the roast target
+  names that subject (normalised substring match + a small alias map
+  — e.g. "سيسي" and "بلحة" match السيسي). A line with no `target:`
+  field is generic and fits any target. When no line fits the roast
+  target, the pool falls back to generic lines only — never a
+  mismatched target-specific line (live bug: "اشتم صلاح" served
+  ro-21 "عاوز يغير في القرآن يا متناك؟", a Sisi line). If even the
+  generic pool is empty, no bank line is served (the LLM handles it)
+  rather than a non-sequitur.
 - Rotation: random pick per trigger category, excluding the last 5
   lines served from that category in that chat (in-memory only), so
   the same comeback does not repeat every time.
@@ -96,6 +106,16 @@ def _has(text: str, words) -> bool:
     )
 
 
+def looks_like_challenge(text: str) -> bool:
+    """True when the message challenges/argues with the bot (v1.3).
+
+    Mirrors the bank's challenge branch (_CHALLENGE_WORDS): "انت غلط",
+    "كلامك غلط", "مش صحيح", "بتخرف", "انت مش فاهم". Used by the
+    handler to mark a turn provoked for voice_check().
+    """
+    return _has(normalize_arabic(text), _CHALLENGE_WORDS)
+
+
 def load_bank(path: str | None = None) -> dict[str, list[dict]]:
     """Parse the bank YAML into {category: [entries]}. Cached after the
     first load; reload_bank() clears the cache (tests). Entries that
@@ -135,15 +155,66 @@ def reload_bank() -> None:
     _last_used.clear()
 
 
-def _pick(category: str, chat_id: int, member_safe_only: bool = True) -> str | None:
+# Normalised aliases for target-specific roast subjects (v1.3).
+# Substring matching (see _target_matches) already covers "سيسي" and
+# "عبد الفتاح السيسي" (both contain / are contained by "السيسي"); the
+# alias map covers spellings that share no substring with the subject.
+# Deliberately NOT aliased: bare "عبد" — extract_insult_target captures
+# only one word, so "اشتم عبد الله" also yields "عبد", and aliasing it
+# would serve Sisi lines for unrelated عبد-prefixed names. Those fall
+# back to generic lines instead (safe, just less specific).
+_TARGET_ALIASES = {
+    "السيسي": {"بلحه", "بلحة"},
+    "كيسنجر": {"كسينجر"},
+}
+
+
+def _target_matches(line_target, roast_target: str | None) -> bool:
+    """True when a bank line may serve for this roast target. A line
+    with no `target:` field is generic and fits any target; a tagged
+    line fits only when the target names its subject (normalised
+    substring match either way, plus the alias map). `line_target`
+    may be a single subject string or a list of them."""
+    if line_target is None:
+        return True
+    rt = normalize_arabic(roast_target or "")
+    if not rt:
+        return False
+    subjects = (
+        line_target if isinstance(line_target, (list, tuple)) else [line_target]
+    )
+    for subject in subjects:
+        s = normalize_arabic(str(subject))
+        if not s:
+            continue
+        if s in rt or rt in s:
+            return True
+        if rt in {normalize_arabic(a) for a in _TARGET_ALIASES.get(s, ())}:
+            return True
+    return False
+
+
+def _pick(
+    category: str,
+    chat_id: int,
+    member_safe_only: bool = True,
+    target: str | None = None,
+) -> str | None:
     """Random line from a category, excluding the last 5 served from it
     in this chat (rotation so the same comeback does not repeat).
     member_safe_only=True (default) excludes lines tagged
     `member_safe: false` — family-insult lines, served only when the
-    caller has established a resolved non-member target."""
+    caller has established a resolved non-member target.
+    target (roast only): when given, only generic lines (no `target:`
+    field) and lines whose `target:` matches it are eligible; when no
+    line fits, the pool is the generic lines only — and if there are
+    no generic lines either, None (never a mismatched line). When
+    target is None (every other category) there is no filtering."""
     entries = load_bank().get(category) or []
     if member_safe_only:
         entries = [e for e in entries if e.get("member_safe", True) is not False]
+    if target is not None:
+        entries = [e for e in entries if _target_matches(e.get("target"), target)]
     if not entries:
         return None
     key = (chat_id, category)
@@ -194,9 +265,12 @@ def match_reply_bank(
     roast_target = extract_insult_target(text)
     if roast_target and not target_is_owner:
         if normalize_arabic(roast_target) != "بهجت":
+            # v1.3: target-specific lines (target: السيسي ...) fire only
+            # for their subject; any other target gets generic lines.
             line = _pick(
                 "roast", chat_id,
                 member_safe_only=(target_is_member is not False),
+                target=roast_target,
             )
             if line is not None:
                 return line

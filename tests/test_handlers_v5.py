@@ -264,7 +264,10 @@ async def test_insult_target_owner_in_system_prompt(pipeline_ctx, tmp_db):
     user = FakeUser(777, first_name="Ahmed")
     msg = FakeMessage("بهجت اشتم سيف", -100222, user, reply_to=reply_to)
     await h._on_group_message_inner(make_update(msg, user, -100222), ctx)
-    assert len(router.calls) == 1
+    # v1.3: "اشتم سيف" is a provoked turn (roast request) and the fake
+    # router's fixed draft "تمام يا عم" is edgeless, so voice_check
+    # flags soft_reply_to_provocation and the handler regenerates once.
+    assert len(router.calls) == 2
     system = next(m["content"] for m in router.calls[0] if m["role"] == "system")
     assert "ممنوع تشتم سيف" in system
 

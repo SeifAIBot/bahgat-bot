@@ -189,6 +189,16 @@ def detect_intent(text: str) -> str:
             return "youtube"
         if len(_content_words(t)) <= _BARE_MEDIA_MAX_WORDS and not _has(t, _QUESTION_MARKERS):
             return "youtube"
+    # v1.3: an insult turn is NEVER a search. This sits after the voice
+    # and YouTube checks (those are not searches) and before the search
+    # check, so "انت حمار، ايه اللي حصل" cannot reach the search path
+    # via a stray search keyword. The live phrase "يا بهجت انتا حمار"
+    # already fell through to just_chat here — the search it produced
+    # came from the handler's unknown-retry (see tg/handlers.py) — but
+    # routing must not depend on that: no insult turn may ever be
+    # classified as search, at any layer.
+    if looks_like_insult_turn(text):
+        return "just_chat"
     if _has(t, _SEARCH_WORDS):
         return "search"
     return "just_chat"
@@ -246,6 +256,11 @@ def detect_prefix_mode(text: str) -> tuple[str, str] | None:
     if first == "دور":
         if _has(rest_s, _YOUTUBE_MEDIA):
             return None
+        # v1.3: "دور يا حمار" is an insult, not a search — the remainder
+        # carries no information request. Fall through to the classifier,
+        # whose insult guard routes it to just_chat.
+        if looks_like_insult(rest_s):
+            return None
         return ("search", rest_s)
     if first in _HAAT_PREFIXES:
         # "هات لي ..." — drop the stray "لي" so the remainder is the query.
@@ -266,7 +281,12 @@ def detect_prefix_mode(text: str) -> tuple[str, str] | None:
 
 
 _INSULT_RE = re.compile(
-    r"(انت|انته)\s+(حمار|غبي|كلب|عبيط|حيوان|وسخ)"
+    # v1.3: "انتا" is the common Egyptian spelling of "انت" (trailing
+    # alif) — "يا بهجت انتا حمار" (live 2026-11-26 19:53 EET) missed
+    # this regex entirely, so no insult path fired for it. Longest
+    # first: "انتا" must be tried before "انت" (which cannot match
+    # "انتا حمار" — "انت" is followed by "ا", not whitespace).
+    r"(انتا|انت|انته)\s+(حمار|غبي|كلب|عبيط|حيوان|وسخ)"
     r"|يا\s*(حمار|غبي|كلب|عبيط|حيوان)"
     r"|اخرس|اسكت يا"
 )
@@ -414,3 +434,12 @@ def extract_insult_target(text: str) -> str | None:
     if not m:
         return None
     return m.group(1)
+
+
+def looks_like_insult_turn(text: str) -> bool:
+    """v1.3: the whole turn is an insult turn — an insult directed at
+    the bot (looks_like_insult) OR a roast request ("اشتم X",
+    extract_insult_target). Either kind must NEVER run a web search:
+    the handler's unknown-retry search is gated on this, and
+    detect_intent() routes it to just_chat before the search check."""
+    return looks_like_insult(text) or extract_insult_target(text) is not None
