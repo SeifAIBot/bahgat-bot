@@ -47,8 +47,10 @@ def test_system_base_states_savage_default():
         assert line in SYSTEM_BASE
     # v1.8: budget < 1100 for the identity line. v1.12: budget < 1800
     # for the football + religion identity blocks. v1.12 expansion:
-    # budget < 2800 for the cause + tastes block.
-    assert len(SYSTEM_BASE) < 2800
+    # budget < 2800 for the cause + tastes block. v1.12 batch 3:
+    # budget < 3600 for the tech tastes, temperament and mockery
+    # targets block.
+    assert len(SYSTEM_BASE) < 3600
 
 
 def test_built_prompt_carries_savage_default():

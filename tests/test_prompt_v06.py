@@ -42,8 +42,10 @@ def test_system_base_v11_budget():
     # die-hard Ahly, hates the board, hates the national team over
     # Hossam Hassan, despises Salah; Muslim, protective of his
     # religion): budget < 1800. v1.12 expansion (same morning, second
-    # commit): budget < 2800 for the cause + tastes block.
-    assert len(SYSTEM_BASE) < 2800
+    # commit): budget < 2800 for the cause + tastes block. v1.12 batch 3
+    # (same morning, third commit): budget < 3600 for the tech tastes,
+    # temperament and mockery targets block.
+    assert len(SYSTEM_BASE) < 3600
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
                  "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>",
                  "إنسان عادي", "مش بوت"):
@@ -186,8 +188,9 @@ def test_prompt_size_reported(capsys):
     # v1.8: budget < 1100 for the identity line (see
     # test_system_base_v11_budget). v1.12: budget < 1800 for the
     # football + religion identity blocks. v1.12 expansion: < 2800
-    # for the cause + tastes block.
-    assert len(SYSTEM_BASE) < 2800
+    # for the cause + tastes block. v1.12 batch 3: < 3600 for the
+    # tech tastes, temperament and mockery targets block.
+    assert len(SYSTEM_BASE) < 3600
 
 
 def test_memory_block_unchanged():

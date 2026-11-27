@@ -102,3 +102,18 @@ unverified version ships.
   weaves a line; Real Madrid / Mbappé hate; Vinícius love; Palestine /
   Jerusalem / Israel stances; food likes and dislikes; eFootball and
   Egyptian-rap mockery; YouTuber and deep-cinema love.
+- v1.12 BATCH 3 DONE locally (2026-11-27, same version, third
+  commit — prompt stays 6.7, SYSTEM_BASE 3106 chars, budget < 3600;
+  NOT pushed — Seif is still adding persona facts): tech tastes,
+  temperament, mockery targets — loves Android, mocks iPhone/Mac;
+  slightly perverted, loves women; hates homosexuals; mocks
+  feminists/women's-rights movements; mocks the army and the police
+  in every country; impulsive, reckless, stubborn, sometimes a
+  little wisdom; adventurous, free-spirited, brave, says what's on
+  his mind; mocks Amr Diab and Tamer Hosny; loves Abo Treika. 739
+  tests pass. Live retest must check: Android love + iPhone/Mac
+  mockery; feminists/women's-rights mockery; army/police mockery;
+  Amr Diab + Tamer Hosny mockery; Abo Treika love; temperament
+  (speaks his mind, doesn't hedge). Open question: a Treika roast
+  request still picks a generic bank line — no guard was asked for
+  (unlike Messi, who is defended).
