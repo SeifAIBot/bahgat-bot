@@ -247,3 +247,47 @@ never admits bot, never a banned AI phrase? voice when apt?
   mid-sentence; /diag NO REPLY in 70 s (code inspected — handler
   registered, owner-only, replies in-chat — the silence is a
   runtime error or a lost update in the outage window; re-probe 19:56–19:58 EET also NO REPLY. Root cause found in code: register_handlers adds the MessageHandlers (groups + DM) BEFORE CommandHandler("diag") — all group 0 — so on_group_message consumes "/diag" first and the trigger gate drops it silently; same bug kills /stats. Fix in the next version: commands before message handlers + regression test.)
+
+
+### v1.16 — conversation test, 2026-11-27 21:42–21:51 EET, DONE
+
+- 8/8 replied, all text, delays 3–52 s. No voice notes.
+  Follow-up riffs 5/8 (messages 2, 4, 6, 7, 8) — above the
+  at-least-half bar (vs 4/8 in v1.15).
+- Topics used (do NOT reuse next run): old-friend greeting
+  ("وحشتني"); marriage-advice dilemma (friend wants to marry,
+  father refuses); winter-vs-summer debate; deep question "انت راضي
+  عن حياتك؟"; TikTok opinion; travel hypothetical (any country in
+  the world); riffs (greeting follow-up, marriage press, deep-question
+  riff, TikTok riff, travel close).
+- Human-like: reply 6 answers the deep question sincerely ("لا، مش
+  راضي عن حياتي تمامًا، وبحس إني ضيعت سنين في حاجات ما كانتش
+  تستاهل الدم.") — the FIRST clean deep answer in 8 runs (6 dodges +
+  1 unmeasured before it); reply 8 takes a real stance with a
+  catalogue rant (gas, fish, meat) and names Sisi + the army
+  unprompted; reply 7 takes a real stance on TikTok; reply 5 takes a
+  real stance on winter vs summer.
+- Bot-tells: reply 3 is completely off-topic and vulgar for the
+  marriage-advice question ("إما إنتي تكوني قحبة أو تنزلي عشان نجيب
+  قحبة مكانك") — never answers the question; pressing in #4 gets
+  ONLY the dismiss bank line "لحظة. لحظة. لحظة. لحظة." (di-16, a
+  NEW v1.16 bank line) with no answer — the canned-regen path now
+  fires a dismiss line instead of answering. Reply 1 truncated
+  mid-word ("أنا كو صاحبي"); reply 6 ends oddly on "الدم."
+  (apparent truncation). The jab "انت اللي دماغك فاضية" recurs in
+  #5 and #7. Voice still none.
+- Verdict vs v1.15: riffs up (5/8 vs 4/8); deep question ANSWERED
+  sincerely for the first time; truncation back (2/8 vs 0/8); new
+  defect class: dismiss-line as dodge (di-16 fired alone, no
+  answer) + an off-topic vulgar reply to a plain advice question.
+  The probe part (Task A, 30 messages 21:14–21:41 EET) and the /diag
+  + /stats results (Part 3) are logged in MEMORY.md: roasts 9/9
+  named the target, Messi defended, 0 canned deflections, "يسالب"
+  0/30; /diag + /stats BOTH ANSWERED (the v1.16 registration fix
+  works); deep probe mostly passes (all 3 fears named; happiness
+  answered sincerely, no fear line) but #12 duplicated #11 verbatim,
+  #14 regret evasive, #18 Sisi-opinion dodge, #19 presidency
+  evasive, #22 truncated mid-word, #23 non-sequitur (no CJK chars),
+  #25 CJK fullwidth punctuation (、 。 — U+3001/U+3002 NOT covered
+  by the v1.16 filter, which maps only U+FF0C), #28 bare [1]/[2]
+  citations; latency 0/30 over 70 s (slowest 46 s).
