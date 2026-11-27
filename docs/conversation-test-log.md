@@ -38,18 +38,16 @@ never admits bot, never a banned AI phrase? voice when apt?
 
 ## v1.10 (WARP) — run 2026-11-27 05:49–06:00 EET, DONE
 
-- 4/8 replied within 60 s (delays 13–32 s); 4 no-reply within 60 s.
-  BUT the 4 "missing" replies are not missing: each nudge's reply
-  answers the ORIGINAL question (msg 3's reply answers msg 2's job
-  question, msg 5's answers msg 4's football question, msg 7's
-  answers msg 6's regret question), so the bot was replying
-  ~100–113 s late (msg 2 → 113 s, msg 4 → 102 s, msg 6 → 101 s;
-  msg 8's reply never observed — the run ended at 06:00). Not
-  ignoring him; answering very slowly in conversation. v1.9 was
-  8/8 at 9–25 s. Functional retest the same morning (05:39–05:45)
-  had LLM replies at 8–18 s, so the slowness is not constant —
-  suspect LLM provider slowness/retries, or v1.10's WARP processes
-  / pod CPU. Needs diagnosis; the v1.11 retest re-measures it.
+- 4/8 replied (delays 13–32 s); 4 no-reply. CORRECTION
+  (2026-11-27 06:54 EET): this was NOT a latency regression —
+  messages 2, 4, 6, 8 contained NO "يا بهجت", so the bot
+  correctly ignored them per its trigger rules (reply only on
+  mention, "بهجت", or reply-to-bot). Messages 1, 3, 5, 7 — all
+  with "يا بهجت" — replied in 13–32 s. The earlier "~100 s
+  late" reading was wrong: the nudges repeated the question
+  WITH the trigger word, and the bot answered the nudge
+  promptly. So: 4/4 addressed messages replied, 4/4
+  unaddressed correctly ignored. No slowness.
 - Topics used (do NOT reuse next run): weekend-plan greeting;
   quit-the-job advice dilemma; الأهلي vs الزمالك debate; regret
   deep question; private-jet hypothetical; riffs (leave the job,
@@ -60,9 +58,61 @@ never admits bot, never a banned AI phrase? voice when apt?
   على نفسه ويحمد ربنا إنه بيقبض قرشين").
 - Bot-tells: deep question dodged AGAIN (regret → "أكتر حاجة
   ندمت عليها إني بصيت في وشك أصلاً" — deflection by insult, not
-  a real answer); the ~100 s reply latency; no voice notes this
-  run. No repeated reply twice, no truncation this run.
-- Verdict vs v1.9: WORSE on responsiveness (4/8 in-window vs
-  8/8), same on deep-question dodging; better on repeats and
-  truncation. Next run (v1.11) must beat: replies within 60 s,
-  answer the personal question for real.
+  a real answer); no voice notes this run. No repeated reply
+  twice, no truncation this run. No latency issue (see the
+  correction above).
+- Verdict vs v1.9: same on responsiveness for addressed messages
+  (4/4, 13–32 s vs 8/8, 9–25 s), same on deep-question dodging;
+  better on repeats and truncation. Next run (v1.11) must beat:
+  answer the personal question for real — and every test message
+  must contain "يا بهجت" (protocol fix, see below).
+
+## v1.11 (bank lines as ingredients) — run 2026-11-27 06:37–06:50 EET, DONE
+
+- 1/6 replied within 120 s (message 1, 9 s); 5 no-replies.
+  CORRECTION (2026-11-27 06:54 EET): this was NOT a silence
+  regression — only message 1 contained "يا بهجت"; messages 2–6
+  did not, so the bot correctly ignored them per its trigger
+  rules. 1/1 addressed replied in 9 s. The live probe right
+  after ("يا بهجت عامل ايه") replied in 16 s, and Cloady showed
+  Running with no crash evidence. The bot was never down. TEST
+  ERROR, not a bot error: the follow-up riffs dropped the
+  trigger word.
+- Topics used (do NOT reuse next run): day/lunch greeting;
+  childhood funny story; sea vs mountains; fear of the future;
+  koshari riff; sudden-fame hypothetical.
+- Verdict vs v1.10: no comparison possible — the run was
+  invalid (test error). The v1.11 conversation behavior is
+  unmeasured; the corrected re-run (every message with
+  "يا بهجت") is the valid measurement. PROTOCOL FIX (standing):
+  every conversation-test message MUST contain "يا بهجت" or be a
+  reply to the bot's message — added to
+  docs/live-test-matrix.md.
+
+### v1.11 — CORRECTED re-run, 2026-11-27 06:57–07:03 EET, DONE
+
+- 8/8 replied, all text, delays 6–28 s. No no-replies, no voice
+  notes. This is the valid v1.11 measurement (replaces the
+  invalid 06:37 run above).
+- Topics used (do NOT reuse next run): morning greeting; birthday
+  gift advice dilemma; cats vs dogs debate; peace/happiness deep
+  question; perfect-Friday planning; riffs on his words (gift,
+  cats, peace).
+- Human-like: answers tied to his words (gift advice with a
+  stance, dogs loyal / cats treacherous, "راحة البال إني مش شايف
+  وشك"); consistent insulting-friend tone; no repeated reply,
+  no truncation.
+- Bot-tells: deep question dodged a THIRD run in a row
+  (peace/happiness → "ابعد عن أشكالكم الزفت... اقفل بقك" —
+  deflection by insult, not a real answer); reply 3 slightly
+  misreads the question ("تعتذرلي أنا؟" — he asked about
+  apologising to his friend, not to the bot); reply 5 repeats a
+  phrase inside itself ("عشان الخيانة طالعة منك" twice). Only
+  3/8 messages were explicit follow-up riffs (below the
+  at-least-half target).
+- Verdict vs v1.9 baseline: same responsiveness (8/8, 6–28 s vs
+  8/8, 9–25 s), same deep-question dodging (now 3 runs running);
+  better on repeats/truncation; worse on voice (none this run
+  vs 1 in v1.9). The deep-question dodge is now a persistent
+  defect — fix candidate: answer personal/deep questions for
+  real instead of deflecting by insult.

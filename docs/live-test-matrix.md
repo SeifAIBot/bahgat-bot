@@ -109,7 +109,12 @@ Topic bank (fresh ideas — pick ones not used in the last run):
   a friend.
 
 Rules: one message at a time, 15–20 s apart, wait up to 60 s per reply.
-Every message starts with "يا بهجت" (trigger). Record everything verbatim:
+Every message starts with "يا بهجت" (trigger). A message WITHOUT the
+trigger is correctly IGNORED by the bot — it is not a no-reply and must
+never be scored as a bot failure; it is a test error (this is what
+invalidated the v1.10 and v1.11 runs: the follow-up riffs dropped the
+trigger, so 4/8 and 5/6 "no-replies" were correct ignores, not bot
+silence). Record everything verbatim:
 sent text + time, reply text/type/delay.
 
 Scored per reply (human-like vs bot-tell):
