@@ -36,7 +36,33 @@ never admits bot, never a banned AI phrase? voice when apt?
   question. Next run (v1.10) must beat: no repeated reply twice, no
   truncation, answer the personal question.
 
-## v1.10 (WARP) — next run
+## v1.10 (WARP) — run 2026-11-27 05:49–06:00 EET, DONE
 
-- Runs after the v1.10 push + redeploy. Compare against the v1.9 baseline
-  above: fewer bot-tells + more tied replies = improving.
+- 4/8 replied within 60 s (delays 13–32 s); 4 no-reply within 60 s.
+  BUT the 4 "missing" replies are not missing: each nudge's reply
+  answers the ORIGINAL question (msg 3's reply answers msg 2's job
+  question, msg 5's answers msg 4's football question, msg 7's
+  answers msg 6's regret question), so the bot was replying
+  ~100–113 s late (msg 2 → 113 s, msg 4 → 102 s, msg 6 → 101 s;
+  msg 8's reply never observed — the run ended at 06:00). Not
+  ignoring him; answering very slowly in conversation. v1.9 was
+  8/8 at 9–25 s. Functional retest the same morning (05:39–05:45)
+  had LLM replies at 8–18 s, so the slowness is not constant —
+  suspect LLM provider slowness/retries, or v1.10's WARP processes
+  / pod CPU. Needs diagnosis; the v1.11 retest re-measures it.
+- Topics used (do NOT reuse next run): weekend-plan greeting;
+  quit-the-job advice dilemma; الأهلي vs الزمالك debate; regret
+  deep question; private-jet hypothetical; riffs (leave the job,
+  football take, regret answer).
+- Human-like: grudge again — reply 1 ("جاي تسألني عامل إيه بعد
+  ما شتمتني؟"); real stances (Ahly fan: "أنا أهلاوي يا معفن،
+  والزمالك خربان زي دماغك"); advice with a stance ("خليه يكبس
+  على نفسه ويحمد ربنا إنه بيقبض قرشين").
+- Bot-tells: deep question dodged AGAIN (regret → "أكتر حاجة
+  ندمت عليها إني بصيت في وشك أصلاً" — deflection by insult, not
+  a real answer); the ~100 s reply latency; no voice notes this
+  run. No repeated reply twice, no truncation this run.
+- Verdict vs v1.9: WORSE on responsiveness (4/8 in-window vs
+  8/8), same on deep-question dodging; better on repeats and
+  truncation. Next run (v1.11) must beat: replies within 60 s,
+  answer the personal question for real.
