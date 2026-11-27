@@ -45,7 +45,7 @@ CHAT_ID = -100222
 # --- prompt level -----------------------------------------------------------
 
 def test_prompt_version_is_6_7():
-    assert PROMPT_VERSION == "6.7"
+    assert PROMPT_VERSION == "6.8"
 
 
 FOOTBALL_LINES = (

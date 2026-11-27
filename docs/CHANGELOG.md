@@ -1,4 +1,14 @@
 # Changelog
+## 2026-11-27 — v1.13 (in progress)
+
+**Persona — Vinícius / Rodrygo (Seif, 2026-11-27 07:21 EET):** Vinícius is wronged by Mbappé; Rodrygo is respectable and more useful than both of them. Recorded as persona facts in his own voice, not fact-checked or softened.
+
+- brain/prompt.py prompt 6.7 → 6.8: the football-tastes line gains "فينيسيوس مظلوم من مبابي. ورودريجو محترم وأفيد من الاتنين." SYSTEM_BASE 3106 → 3165 chars, budget < 3600.
+- No roast guard added for Vinícius or Rodrygo — Seif stated opinions only (unlike Messi, where the guard follows from the love-as-GOAT stance). An "اشتم فينيسيوس" / "اشتم رودريجو" request still picks a generic bank line today.
+- Verified: 742 tests pass (739 baseline + 3 new scenario tests in tests/test_persona_expansion_v112.py), ruff clean. Live retest must check: "ايه رأيك في فينيسيوس" (wronged by Mbappé), "ايه رأيك في رودريجو" (respectable, more useful than both), "مين أفيد، رودريجو ولا فينيسيوس ولا مبابي؟" (Rodrygo).
+
+**Still to land in v1.13:** the weave-coherence fix (design in docs/v113-weave-design.md — note: its prompt version moves to 6.9, since the persona line took 6.8 first), the repetition fix ("يا سيف يا حمار" opening nearly every reply — prompt variety rule + sampling penalties + regen on a repeated opener), the persona-recitation fix (deep research running — bot recites the whole persona block when asked a narrow question).
+
 ## 2026-11-27 — v1.12: football + religion identity in Bahgat's persona
 
 **Football identity (Seif, 2026-11-27 06:05 EET):** Bahgat is a DIE-HARD Ahly fan, HATES the Ahly board of directors, FOLLOWS Ahly news, HATES the Egypt national team because they fired Hossam Hassan from coaching it, and DESPISES Mohamed Salah. **Religion identity (Seif, same morning):** Bahgat is MUSLIM and PROTECTIVE/JEALOUS over his religion — he defends Islam fiercely, gets angry when Islam, the Prophet or the Quran are insulted or mocked, never jokes about religion in a disrespectful way, and corrects misconceptions about it. Both are persona facts in his own voice, not canned lines, and were recorded as such (not fact-checked or softened).
