@@ -31,8 +31,8 @@ def _reset_bank():
 
 # --- prompt: savagery is the default ------------------------------------------
 
-def test_prompt_version_is_7_0():
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+def test_prompt_version_is_7_2():
+    assert PROMPT_VERSION == "7.2"  # v1.16: persona-fidelity behaviour lines
 
 
 def test_system_base_states_savage_default():
@@ -186,20 +186,20 @@ def test_voice_check_soft_polite_markers():
 
 # --- bank: insulted pool grew, honestly ----------------------------------------
 
-def test_insulted_pool_grew_to_44_served():
+def test_insulted_pool_grew_to_45_served():
     import yaml
     from pathlib import Path
     raw = yaml.safe_load(open(
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
     insulted_raw = [e for e in raw if e["trigger"] == "insulted"]
-    assert len(insulted_raw) == 45  # 15 transcript -> 45 (+30 user)
-    assert len(load_bank()["insulted"]) == 44  # 14 served -> 44 served
-    assert len(raw) == 224
-    assert sum(len(v) for v in load_bank().values()) == 212
+    assert len(insulted_raw) == 46  # 15 transcript -> 46 (+30 user, +1 v1.16 study)
+    assert len(load_bank()["insulted"]) == 45  # 14 served -> 45 served (v1.16: in-46)
+    assert len(raw) == 241  # v1.16: +17 study lines
+    assert sum(len(v) for v in load_bank().values()) == 229  # v1.16: +17 served
     conf = {e["confidence"] for e in insulted_raw}
     assert conf <= {"verbatim", "cleaned", "approximate", "user"}
-    assert sum(1 for e in insulted_raw if e["confidence"] == "verbatim") == 6
+    assert sum(1 for e in insulted_raw if e["confidence"] == "verbatim") == 7  # v1.16: in-46
     assert sum(1 for e in insulted_raw if e["confidence"] == "cleaned") == 8
     assert sum(1 for e in insulted_raw if e["confidence"] == "approximate") == 1
     assert sum(1 for e in insulted_raw if e["confidence"] == "user") == 30
@@ -228,11 +228,30 @@ def test_insulted_pool_no_near_duplicates_or_generic_filler():
 
 
 def test_insulted_pool_has_no_family_insult():
-    # The insulted target is always the sender (a member): every
-    # served insulted line must be person-only.
-    for e in load_bank()["insulted"]:
-        assert e.get("member_safe", True) is not False, e["id"]
-        assert not contains_family_insult(e["line"]), e["id"]
+    # v1.16: the insulted pool now contains EXACTLY ONE family line
+    # (in-46, "يبن المرة المتعرية" — a real Bahgat line from the
+    # persona study, tagged member_safe: false). The safety rule
+    # moved to pick time: the comeback target is always the sender
+    # (a member), so the pick (member_safe_only=True by default)
+    # must never return a family line for a member sender.
+    served = load_bank()["insulted"]
+    family = [e for e in served if e.get("member_safe", True) is False]
+    assert [e["id"] for e in family] == ["in-46"]
+    # NOTE: the detector (core/rules.contains_family_insult) does NOT
+    # catch in-46's colloquial form ("يبن المرة المتعرية") — the tag
+    # is what enforces the rule, and the pick filters on the tag, not
+    # on the detector. Do not assert the detector here; the tag is the
+    # safety mechanism and it is asserted above.
+    for e in served:
+        if e["id"] != "in-46":
+            assert not contains_family_insult(e["line"]), e["id"]
+    # Pick-time: 60 draws for a member sender never return a family line.
+    from brain.reply_bank import _pick
+    for i in range(60):
+        line = _pick("insulted", -1005812444791 - i, user_id=777 + i)
+        assert line is not None
+        assert not contains_family_insult(line), line
+        assert line != family[0]["line"]
     # And every line carries source + honest confidence marking.
     import yaml
     from pathlib import Path

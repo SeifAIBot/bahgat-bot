@@ -443,10 +443,21 @@ def test_mood_bump_by_situation_table():
 # --- 6. member safety (bank + post-check) -------------------------------------
 
 def test_insulted_pool_never_carries_family_lines():
-    # The comeback target is always the sender (a member): the whole
-    # insulted pool must be member-safe by construction.
-    assert all(e.get("member_safe", True) is not False
-               for e in load_bank()["insulted"])
+    # v1.16: the insulted pool now contains exactly one family line
+    # (in-46, member_safe: false — a real Bahgat line from the
+    # persona study). The safety rule is pick-time: the comeback
+    # target is always the sender (a member), so the pick
+    # (member_safe_only=True by default) must never return it.
+    from brain.reply_bank import _pick
+    from core.rules import contains_family_insult
+    family = [e for e in load_bank()["insulted"]
+              if e.get("member_safe", True) is False]
+    assert [e["id"] for e in family] == ["in-46"]
+    for i in range(60):
+        line = _pick("insulted", CHAT_ID - i, user_id=777 + i)
+        assert line is not None
+        assert not contains_family_insult(line), line
+        assert line != family[0]["line"]
 
 
 def test_check_reply_strips_family_for_members_keeps_for_outsiders():
@@ -688,7 +699,10 @@ async def test_roast_tamer_misdirected_weave_falls_back_to_line(
     line = ingredient_of_call(router.calls[0])
     assert line is not None, "no [BANK LINE] ingredient in the LLM call"
     final = msg.reply_text.await_args.args[0]
-    assert final == line
+    # v1.16: the fallback names the target — the line verbatim, or
+    # prefixed with a "يا تامر،" vocative when it does not name him.
+    assert final in (line, "يا تامر، " + line)
+    assert "تامر" in final
 
 
 async def test_roast_messi_coherent_defense_no_feminine_line(

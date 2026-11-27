@@ -280,7 +280,7 @@ def test_muslim_question_religion():
     sel = select_facts("يا بهجت انت مسلم؟")
     assert sel is not None
     assert sel["topic"] == "religion" and sel["polarity"] is None
-    assert len(sel["facts"]) == 4
+    assert len(sel["facts"]) == 6  # v1.16: f20–f23 + f54 + f55
 
 
 def test_youtubers_love():
@@ -296,16 +296,19 @@ def test_polarity_with_no_rows_falls_back_to_slice():
     sel = select_facts("بتكره ايه في الدين؟")
     assert sel is not None
     assert sel["topic"] == "religion" and sel["polarity"] is None
-    assert len(sel["facts"]) == 4
+    assert len(sel["facts"]) == 6  # v1.16: f20–f23 + f54 + f55
 
 
 def test_hate_item_yes_no_question():
-    # Adversarial: a yes/no question about a HATE item still selects
-    # the LOVES — the facts block must not hand the model the hate.
+    # v1.16 — the boftik trap (live v1.14 probe #6): a yes/no
+    # question about a HATE item now selects the HATES, so the
+    # facts block hands the model "بيكره: بفتيك..." and it answers
+    # "لا، بكرهه" instead of evading with the loves list. The old
+    # v1.14 assertion (selects the loves) was the defect.
     sel = select_facts("يا بهجت بتحب البفتيك؟")
     assert sel is not None
-    assert sel["topic"] == "food" and sel["polarity"] == "love"
-    assert [f["id"] for f in sel["facts"]] == ["f01", "f02"]
+    assert sel["topic"] == "food" and sel["polarity"] == "hate"
+    assert [f["id"] for f in sel["facts"]] == ["f03", "f04", "f05", "f06"]
 
 
 def test_magrib_prayer_is_religion_not_politics():
@@ -403,21 +406,23 @@ def test_check_reply_applies_persona_filter():
 # --- (A) no fact lost ------------------------------------------------------
 
 def test_no_fact_lost():
-    """Every SYSTEM_BASE 6.9 fact appears in exactly one row: 51 rows
-    (food 6, football 13, religion 4, politics 9, youtubers 3, taste
-    1, tech 3, mockery 7, temperament 5). The style/rules lines stayed
-    in SYSTEM_BASE and are asserted in test_prompt_v06.py, not here."""
-    assert len(FACTS) == 51
+    """Every SYSTEM_BASE 6.9 fact appears in exactly one row: 59 rows
+    (food 6, football 13, religion 6, politics 11, youtubers 3, taste
+    1, tech 3, mockery 7, temperament 5, social 1, personal 3). The
+    style/rules lines stayed in SYSTEM_BASE and are asserted in
+    test_prompt_v06.py, not here. v1.16 adds f52–f56 (persona study
+    §(ix)) + f57–f59 (Seif's three fears, deep router)."""
+    assert len(FACTS) == 59
     by_topic = {}
     for f in FACTS:
         by_topic.setdefault(f["topic"], []).append(f)
     assert {t: len(v) for t, v in by_topic.items()} == {
-        "food": 6, "football": 13, "religion": 4, "politics": 9,
+        "food": 6, "football": 13, "religion": 6, "politics": 11,
         "youtubers": 3, "taste": 1, "tech": 3, "mockery": 7,
-        "temperament": 5,
+        "temperament": 5, "social": 1, "personal": 3,
     }
     ids = [f["id"] for f in FACTS]
-    assert len(set(ids)) == len(ids) == 51
+    assert len(set(ids)) == len(ids) == 59
     for f in FACTS:
         assert f["topic"] in TOPICS
         assert f["polarity"] in ("love", "hate", "neutral", "trait")
@@ -440,6 +445,8 @@ def test_no_fact_lost():
         "الشواذ", "النسويات", "حقوق المراه", "الجيش", "الشرطه",
         "عمرو دياب", "تامر حسني",
         "مندفع", "متهور", "عنيد", "مغامر", "شجاع", "النسوان",
+        "مرشد", "عفو", "وسطي", "الطياره", "الايما",
+        "موت برا", "وحيد", "صحته",
     ]:
         assert normalize_arabic(item) in blob, f"fact lost: {item}"
 
@@ -502,16 +509,25 @@ async def test_golden_hates_probe_filters_loves(monkeypatch, settings):
 
 @pytest.mark.asyncio
 async def test_golden_hate_item_yes_no(monkeypatch, settings):
-    """Adversarial: the model claims to love a hate item — the filter
-    drops the clause and the template fallback answers from the
-    selected loves."""
-    router = ScriptedRouter(["بحب البفتيك أوي."])
+    """v1.16 — the boftik fix, end to end: "بتحب البفتيك؟" selects
+    the HATES, so the facts block says he hates it and a correct
+    answer ("لا، بكره البفتيك") passes through naming the hate item
+    — no evasion into the loves list, no love clause surviving the
+    hate turn's post-filter. (The old v1.14 version of this test
+    asserted the opposite selection — that WAS the defect.)"""
+    router = ScriptedRouter(["لا، بكره البفتيك يا عم."])
     _, _, msg, _ = await _run_turn(
         monkeypatch, settings, "يا بهجت بتحب البفتيك؟", router)
     reply = _sent_text(msg)
     assert reply is not None
-    assert "بفتيك" not in reply
-    assert "بشاميل" in reply
+    assert "بفتيك" in reply
+    assert "بشاميل" not in reply and "محشي" not in reply
+    call = router.calls[0]
+    contents = [m.get("content") or "" for m in call]
+    facts_msgs = [c for c in contents if "<facts>" in c]
+    assert len(facts_msgs) == 1
+    assert "أكل بيكره:" in facts_msgs[0]
+    assert "بفتيك" in facts_msgs[0]
 
 
 @pytest.mark.asyncio

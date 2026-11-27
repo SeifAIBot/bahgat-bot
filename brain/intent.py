@@ -657,6 +657,12 @@ _DEEP_WORDS = [
     "حاسس", "مبسوط", "ناقصك", "ندمت", "ندمان", "خايف", "بتخاف",
     "خوف", "حلمك", "بتحلم", "حياتك", "فرحان", "زعلان", "مكتئب",
     "وحيد", "بتتمنى", "نفسك",
+    # v1.16: "خوفك" / "بتخوفك" / "بيخوفك" — "ايه اللي بيخوفك؟" /
+    # "خوفك ايه؟" ask about his fear without the bare "خايف" /
+    # "خوف" forms. (The v1.16 draft had only "بتخوفك" — the
+    # third-person "بيخوفك" in the comment's own example never
+    # matched; both prefixes are in the list now.)
+    "خوفك", "بتخوفك", "بيخوفك",
 ]
 
 
@@ -664,3 +670,16 @@ def looks_like_deep_question(text: str) -> bool:
     """True when the message asks a personal / deep question about
     the bot's feelings, life, regrets or dreams."""
     return _has(normalize_arabic(text or ""), _DEEP_WORDS)
+
+
+_FEAR_WORDS = ["خايف", "بتخاف", "خوف", "خوفك", "بتخوفك", "بيخوفك"]
+
+
+def looks_like_fear_question(text: str) -> bool:
+    """True when the message asks about fear specifically — a subset
+    of looks_like_deep_question. The deep-turn fear containment
+    (v1.16) applies ONLY here: a happiness/regret/dream question
+    answered sincerely must not be replaced by a fear line (the
+    v1.11 deep test's "أنا مبسوط" answer is valid and names no
+    fear)."""
+    return _has(normalize_arabic(text or ""), _FEAR_WORDS)

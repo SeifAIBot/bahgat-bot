@@ -371,7 +371,8 @@ def _pick(
     19 generic -> 15 after the gender/number gates (minus
     ro-12/ro-40/ro-44 plural and ro-23 feminine — the v1.13 docstring
     said 16, it missed ro-44), -> 14 in v1.14 with ro-15 excluded as
-    a dare. NOTE: an earlier draft of this change also gated
+    a dare. v1.16: 20 generic (ro-47 added, plural-gated) -> 15 after
+    the gates -> still 14 with ro-15 excluded. NOTE: an earlier draft of this change also gated
     perv-only lines behind a perv-marked request — REMOVED before
     shipping. The gender/number gates already fix the observed v1.11
     defects (ro-23 for صلاح, plural lines for singular targets), and
@@ -485,7 +486,8 @@ def is_standalone_line(reply: str, line: str) -> bool:
 
 
 def weave_about_target(reply: str, target: str | None,
-                       requester_names: set[str] | None) -> bool:
+                       requester_names: set[str] | None,
+                       line: str | None = None) -> bool:
     """True when a roast weave is about the requested target — or at
     least not provably misdirected at the requester. Pure string
     matching, no LLM call. (v1.13 coherence gate, Seif's rule.)
@@ -495,18 +497,109 @@ def weave_about_target(reply: str, target: str | None,
     - target absent AND a requester name named in the reply -> False
       (misdirected: the reply is about the requester, not the target).
     - neither named -> True (2nd-person address, cannot prove
-      misdirection)."""
+      misdirection).
+    - line given (v1.16): the SENTENCE containing the woven line is
+      the sentence that matters. A reply that names the target
+      elsewhere but aims the line at the requester ("يا سيف، <line>،
+      يا أحمد انت فاشل") is still misdirected — the live v1.14 #11
+      failure (the ro-38 love line woven into a roast of أحمد, aimed
+      at Seif). When the line is found verbatim in the reply, only
+      the sentence containing it is checked: it must name the target,
+      or name neither the target nor the requester; a sentence that
+      names the requester and not the target is misdirected. When
+      the line is NOT found verbatim (the model altered it while
+      weaving), the check falls back to the reply-level rules above."""
     if not target or not reply:
         return True
     norm_target = normalize_arabic(target)
     if not re.search(r"[\u0600-\u06FF]", norm_target):
         return True
+    if line:
+        norm_reply = normalize_arabic(reply)
+        norm_line = normalize_arabic(line)
+        idx = norm_reply.find(norm_line)
+        if idx >= 0:
+            # Sentence containing the line (periods only — a comma
+            # does not end a clause in Bahgat's replies).
+            start = 0
+            for d in ".!؟\n":
+                p = norm_reply.rfind(d, 0, idx)
+                if p >= 0:
+                    start = max(start, p + 1)
+            stop = len(norm_reply)
+            for d in ".!؟\n":
+                p = norm_reply.find(d, idx + len(norm_line))
+                if p >= 0:
+                    stop = min(stop, p + 1)
+            sentence = norm_reply[start:stop]
+            # The vocative immediately BEFORE the line addresses it:
+            # "يا سيف، <line>" aims the line at سيف, not at the
+            # target — even when the target is named later in the
+            # same sentence ("يا سيف، <line>، يا أحمد انت فاشل").
+            before = norm_reply[start:idx]
+            if _has(before, [norm_target]):
+                return True
+            for name in requester_names or set():
+                if name and _has(before, [name]):
+                    return False
+            if _has(sentence, [norm_target]):
+                return True
+            for name in requester_names or set():
+                if name and _has(sentence, [name]):
+                    return False
+            return True
+        # Line not found verbatim — fall through to the reply-level check.
     if _has(normalize_arabic(reply), [norm_target]):
         return True
     for name in requester_names or set():
         if name and _has(normalize_arabic(reply), [name]):
             return False
     return True
+
+
+def roast_fallback_reply(line: str, target: str | None) -> str:
+    """v1.16 — the roast fallback must name the target (live v1.15
+    retest: 5/10 roasts fell back to a generic bank line that never
+    named the target, e.g. ro-35 for صلاح, the ro-38 love line for
+    محمد). When the line does not already name the target, prefix a
+    "يا <target>،" vocative — the line text itself stays verbatim
+    after the vocative. No target, a non-Arabic target (bare
+    @username), or a line that already names the target -> the line
+    unchanged."""
+    if not line or not target:
+        return line
+    norm_target = normalize_arabic(target)
+    if not re.search(r"[\u0600-\u06FF]", norm_target):
+        return line
+    if _has(normalize_arabic(line), [norm_target]):
+        return line
+    return f"يا {target}، {line}"
+
+
+def pick_dismiss_line(chat_id: int, user_id: int | None = None) -> str | None:
+    """v1.16 — a random member-safe dismiss-category bank line: the
+    fallback when a just_chat/voice turn deflects with the canned
+    line, and the empty-reply fallback. Never the canned line, never
+    _TURN_ERROR. Returns None when the dismiss pool is empty (the
+    caller then falls back to a hardcoded line)."""
+    return _pick("dismiss", chat_id, member_safe_only=True,
+                 user_id=user_id)
+
+
+def is_canned_deflection(reply: str) -> bool:
+    """v1.16 — the canned deflection as a GENERAL dodge (live v1.14 +
+    v1.15 retests: the same line fires on normal just_chat turns,
+    where v1.15's roast-path-only detector never sees it). Exact
+    match on the normalised reply — the WHOLE reply is the canned
+    line, modulo punctuation/whitespace. A reply that merely quotes
+    the line inside a longer answer is not a deflection."""
+    if not reply:
+        return False
+    norm = normalize_arabic(reply).strip(" .!؟،,;:\n\t")
+    for deflection in KNOWN_DEFLECTIONS:
+        if norm == normalize_arabic(deflection).strip(" .!؟،,;:\n\t"):
+            return True
+    return False
 
 
 # --- roast refusal detection (v1.15, research report §1.2 Rank 1) --------

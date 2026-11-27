@@ -46,7 +46,7 @@ CHAT_ID = -100222
 
 def test_prompt_version_is_7_0():
     # v1.14: prompt 7.0 — the persona facts atomised out of SYSTEM_BASE.
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+    assert PROMPT_VERSION == "7.2"  # v1.16: persona-fidelity behaviour lines
 
 
 # Row phrases for the batch-3 facts (brain/persona_facts.py) — the old

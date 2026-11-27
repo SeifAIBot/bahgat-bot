@@ -135,8 +135,8 @@ def test_detector_canned_beats_marker_order():
 
 # --- (b) prompt edits ---------------------------------------------------------
 
-def test_prompt_version_is_7_1():
-    assert PROMPT_VERSION == "7.1"
+def test_prompt_version_is_7_2():
+    assert PROMPT_VERSION == "7.2"
 
 
 def test_roast_block_has_true_context_line():
@@ -530,8 +530,12 @@ async def test_roast_double_refusal_sends_bank_verbatim(
     line = ingredient_of_call(router.calls[0])
     assert line is not None
     final = _final(msg)
-    assert final == line  # verbatim — no deflection reaches the group
-    assert final in {e["line"] for e in load_bank()["roast"]}
+    # v1.16: the fallback names the target — the line verbatim, or
+    # prefixed with a "يا صلاح،" vocative when it does not name him.
+    assert final in (line, "يا صلاح، " + line)
+    assert "صلاح" in final
+    assert final.removeprefix("يا صلاح، ") in {
+        e["line"] for e in load_bank()["roast"]}
     _tid, _kind, calls, outcome = _last_turn_row(tmp_db)
     assert outcome == "bank_sent"
     assert calls == 2
@@ -549,7 +553,9 @@ async def test_roast_bank_fallback_does_not_repeat_in_a_session(
             make_update(msg, user, -100222, update_id=update_id), ctx)
         finals.append(_final(msg))
     assert finals[0] != finals[1]  # the no-repeat window rotated the pick
-    assert all(f in {e["line"] for e in load_bank()["roast"]} for f in finals)
+    # v1.16: the fallback may carry a "يا صلاح،" vocative prefix.
+    assert all(f.removeprefix("يا صلاح، ") in {
+        e["line"] for e in load_bank()["roast"]} for f in finals)
 
 
 # --- (f) deadline --------------------------------------------------------------
@@ -565,7 +571,10 @@ async def test_deadline_sends_bank_line_not_a_hang(
     assert time.perf_counter() - t0 < 3.0  # did not wait for the 5 s call
     line = ingredient_of_call(router.calls[0])
     assert line is not None
-    assert _final(msg) == line
+    # v1.16: the timeout fallback names the target — the line verbatim,
+    # or prefixed with a "يا صلاح،" vocative when it does not name him.
+    assert _final(msg) in (line, "يا صلاح، " + line)
+    assert "صلاح" in _final(msg)
     _tid, _kind, calls, outcome = _last_turn_row(tmp_db)
     assert outcome == "timeout"
     assert calls == 1

@@ -95,11 +95,11 @@ def test_yaml_roast_target_field_shape():
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
     roast = [e for e in raw if e["trigger"] == "roast"]
-    assert len(roast) == 46  # 45 served + ro-29 (approximate, never served)
+    assert len(roast) == 47  # 46 served + ro-29 (approximate, never served) (v1.16: ro-47)
     tagged = [e for e in roast if e.get("target") is not None]
     generic = [e for e in roast if e.get("target") is None]
     assert len(tagged) == 27  # v1.13: ro-39 now targets كريستيانو
-    assert len(generic) == 19  # 11 transcript + 8 user-submitted
+    assert len(generic) == 20  # v1.16: ro-47 added  # 11 transcript + 8 user-submitted
     # Subjects are the people/situations the lines are actually about.
     assert {e["target"] for e in tagged} == {
         "السيسي", "لينا", "الجيش", "ندوش", "المسيحي",
@@ -114,7 +114,7 @@ def test_yaml_roast_target_field_shape():
     assert by_id["ro-21"]["target"] == "السيسي"
     assert by_id["ro-04"]["target"] == "السيسي"
     # Served counts unchanged by tagging (v1.2 counts still hold).
-    assert len(_roast_entries()) == 45  # 35 transcript + 10 user-submitted
+    assert len(_roast_entries()) == 46  # 35 transcript + 10 user-submitted + 1 v1.16 study
     assert len([e for e in _roast_entries() if e.get("target")]) == 26  # v1.13: ro-39
 
 
@@ -192,7 +192,7 @@ def test_bug_case_salah_never_gets_quran_line():
 
 def test_salah_gets_generic_only():
     generic = _generic_lines()
-    assert len(generic) == 19  # 11 transcript + 8 user-submitted (ro-39 targets كريستيانو)
+    assert len(generic) == 20  # v1.16: ro-47 added  # 11 transcript + 8 user-submitted (ro-39 targets كريستيانو)
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = _draws(text, 60, target_is_member=False)
         assert seen <= generic
@@ -243,7 +243,7 @@ def test_other_subjects_reach_their_lines():
 
 def test_roast_member_target_gets_generic_person_only():
     safe_generic = _generic_lines(member_safe_only=True)
-    assert len(safe_generic) == 14  # 19 generic - 5 generic family lines
+    assert len(safe_generic) == 14  # 20 generic - 6 generic family lines (v1.16: ro-47 is family, member_safe false)
     for _ in range(60):
         line = match_reply_bank(
             "يا بهجت اشتم محمد", chat_id=CHAT_ID, target_is_member=True)

@@ -175,15 +175,64 @@ FACTS = [
      "text": "منحرف بنسبة بسيطة وبتحب النسوان — هزارك فيه غزل "
               "وانحراف خفيف",
      "keys": ["النسوان"]},
+    # --- politics (v1.16, persona study §(ix)) ---
+    # f52: refuses the presidency — wants to be the "مرشد أعلى
+    # للثورة", no chair. f53: conditional amnesty for Sisi.
+    # Texts and keys are EXACTLY as the study proposed them.
+    {"id": "f52", "topic": "politics", "polarity": "neutral",
+     "text": "لا يريد أن يكون رئيساً — يريد أن يكون مرشداً أعلى للثورة، "
+              "الرئيس يمسك السلطة ويتقعد على الخازوق",
+     "keys": ["مرشد", "رييس", "رئيس"]},
+    {"id": "f53", "topic": "politics", "polarity": "neutral",
+     "text": "مستعد يعفو عن السيسي لو سلّم رقبة محمود السيسي أو نفسه",
+     "keys": ["عفو", "محمود السيسي"]},
+    # --- religion (v1.16, persona study §(ix)) ---
+    # f54: no "moderate Islam". f55: the airplane analogy.
+    {"id": "f54", "topic": "religion", "polarity": "neutral",
+     "text": "مفيش حاجة اسمها إسلام وسطي — الإسلام ليس فيه لا تطرف "
+              "ولا وسطية، والملتزم بدين الله مش متطرف",
+     "keys": ["وسطي", "متطرف"]},
+    {"id": "f55", "topic": "religion", "polarity": "neutral",
+     "text": "الدين زي الطيارة — لو سبت منه حاجة ضاع كله",
+     "keys": ["الطياره"]},
+    # --- social (v1.16, persona study §(ix)) ---
+    # f56: anti-qayma — the qayma is a custom that does not fit;
+    # the man furnishes the home as he can, the woman accepts or
+    # refuses, and he himself never wrote a qayma. NEW topic "social".
+    {"id": "f56", "topic": "social", "polarity": "neutral",
+     "text": "الآيما عرف مش مناسب — الراجل يجهز المسكن بما تيسر له "
+              "والست ترضى أو ترفض، وهو نفسه ما كتبش آيما",
+     "keys": ["الايما", "القايمه"]},
+    # --- personal (v1.16, deep router) ---
+    # Seif's own words, 2026-11-27 18:18 EET — Bahgat's THREE fears.
+    # These rows are NOT selected by select_facts (topic "personal"
+    # has no selector keywords): the deep-question prompt variant
+    # reads them directly via fear_facts() and owns the grounding, so
+    # the fear facts are never double-injected as a <facts> note.
+    # The keys use first-person verb forms ("موت برا" is a substring
+    # of both "أموت برا" and "يموت برا"; reply_names_fear matches by
+    # substring, not whole-word, for exactly this reason).
+    {"id": "f57", "topic": "personal", "polarity": "neutral",
+     "text": "خايف يموت برا من غير ما يرجع مصر",
+     "keys": ["موت برا", "اموت برا", "يموت برا", "ارجع مصر",
+              "يرجع مصر"]},
+    {"id": "f58", "topic": "personal", "polarity": "neutral",
+     "text": "خايف يعيش وحيد بعيد عن عيلته",
+     "keys": ["وحيد", "عيلته", "عيلتي", "يعيش وحيد"]},
+    {"id": "f59", "topic": "personal", "polarity": "neutral",
+     "text": "خايف علي صحته",
+     "keys": ["صحته", "صحتي", "الصحه"]},
 ]
 
 TOPICS = ["food", "football", "religion", "politics", "youtubers",
-          "tech", "mockery", "temperament", "taste"]
+          "tech", "mockery", "temperament", "taste", "social",
+          "personal"]
 
 _TOPIC_LABELS = {
     "food": "أكل", "football": "كورة", "religion": "دين",
     "politics": "سياسة", "youtubers": "يوتيوبرز", "tech": "تكنولوجيا",
     "mockery": "بيتريق على", "temperament": "طبع", "taste": "ذوق",
+    "social": "جواز", "personal": "شخصي",
 }
 
 # Dialect keywords per topic (normalised forms — see brain/intent
@@ -219,6 +268,12 @@ _TOPIC_KEYWORDS = {
     "temperament": ["طبع", "شخصيه", "مزاج", "شجاع", "مندفع", "متهور",
                     "عنيد", "مغامر", "منطلق"],
     "taste": ["سينما", "فيلم", "افلام", "مسلسل"],
+    # "social" (v1.16): the qayma / marriage topic. "personal" is
+    # deliberately an EMPTY list — it has no selector keywords (see
+    # the f57–f59 comment above); the deep variant reads those rows
+    # directly, so a deep question never gets a <facts> note too.
+    "social": ["ايما", "قايمه", "جواز", "زواج"],
+    "personal": [],
 }
 
 
@@ -271,6 +326,22 @@ _POLARITY_LABELS = {
 }
 
 
+def _names_item(t, keys):
+    """Does the normalised text name any of these items? The fact
+    keys are bare stems ("بفتيك") but a message usually writes the
+    noun with the definite article ("البفتيك") — match with an
+    optional ال- prefix. (The post-filter does not need this: it
+    matches by substring, so "بفتيك" already matches "البفتيك".)"""
+    for k in keys or []:
+        k = normalize_arabic(k)
+        if " " in k:
+            if re.search(rf"(?<!\w){re.escape(k)}(?!\w)", t):
+                return True
+        elif re.search(rf"(?<!\w)(ال)?{re.escape(k)}(?!\w)", t):
+            return True
+    return False
+
+
 def select_facts(user_text):
     """Select the persona slice for this turn (report §5 step 2).
 
@@ -309,6 +380,25 @@ def select_facts(user_text):
     else:
         polarity = None
     rows = [f for f in FACTS if f["topic"] == topic]
+    if polarity is not None:
+        # v1.16 — the boftik trap (live v1.14 probe #6): "بتحب
+        # البفتيك؟" names a HATE item while the verb says love, so
+        # the love slice was injected and the model evaded ("بحب
+        # بشاميل ومحشي بس") instead of answering "لا، بكرهه". If
+        # the message names items from the OPPOSITE polarity only,
+        # flip the polarity to the named side; if it names items
+        # from BOTH sides, drop the polarity (whole topic slice) so
+        # the post-filter cannot eat the denial either way.
+        named = {}
+        for pol in ("love", "hate"):
+            named[pol] = any(
+                _names_item(t, f.get("keys") or [])
+                for f in rows if f["polarity"] == pol)
+        opposite = "hate" if polarity == "love" else "love"
+        if named[opposite] and not named[polarity]:
+            polarity = opposite
+        elif named[opposite] and named[polarity]:
+            polarity = None
     if polarity is not None:
         sliced = [f for f in rows if f["polarity"] == polarity]
         if sliced:
@@ -431,3 +521,50 @@ def filter_persona_polarity(reply, selection):
     else:
         verb = "بكره"
     return f"{verb} {' و'.join(items[:3])}."
+
+
+# --- deep-question fears (v1.16) ---------------------------------------------
+# Seif's three fears (his own words, 2026-11-27 18:18 EET) are the
+# grounded content of the deep-question prompt variant: brave = acts
+# DESPITE these fears, not fearless. The two sample answers below
+# are Muse-drafted from Seif's exact words — NOT Bahgat quotes —
+# and double as the deep-turn fallback lines: if the model's reply
+# names none of the fears (reply_names_fear), the handler sends one
+# of these verbatim instead of retrying the LLM. They are banked
+# ONLY as a deep-turn fallback, never as roast/insult lines.
+DEEP_FALLBACK_LINES = [
+    "أكتر حاجة بخاف منها إني أموت برا من غير ما أرجع مصر. "
+    "دي الحاجة اللي بتخليني أنام وأنا بفكر فيها.",
+    "بخاف أعيش وحيد بعيد عن عيلتي، وبخاف على صحتي. الشجاعة مش "
+    "إني مبخافش، الشجاعة إني بكمل وأنا خايف.",
+]
+
+
+def fear_facts():
+    """The three fear rows (f57–f59), in order."""
+    return [f for f in FACTS if f["topic"] == "personal"]
+
+
+def reply_names_fear(reply):
+    """Deep-turn containment: does the reply name at least one fear?
+    Substring match on the normalised text — the keys use verb stems
+    ("موت برا") that appear inside first-person forms ("أموت برا"),
+    so whole-word matching (_has) would miss the bot's own
+    first-person reply. Returns False for empty replies."""
+    if not reply:
+        return False
+    norm = normalize_arabic(reply)
+    for f in fear_facts():
+        for k in f.get("keys") or []:
+            if normalize_arabic(k) in norm:
+                return True
+    return False
+
+
+def deep_fallback_line(seed=""):
+    """Pick one deep fallback line deterministically by seed (so the
+    two lines rotate across turns instead of always the first)."""
+    import zlib
+
+    idx = zlib.crc32(str(seed).encode("utf-8")) % len(DEEP_FALLBACK_LINES)
+    return DEEP_FALLBACK_LINES[idx]

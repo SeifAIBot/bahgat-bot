@@ -451,7 +451,10 @@ async def test_misdirected_weave_falls_back_to_line_verbatim(
     line = ingredient_of_call(router.calls[0])
     assert line is not None
     final = _final(msg)
-    assert final == line
+    # v1.16: the fallback names the target — the line verbatim, or
+    # prefixed with a "يا تامر،" vocative when it does not name him.
+    assert final in (line, "يا تامر، " + line)
+    assert "تامر" in final
 
 
 async def test_coherent_weave_is_sent_as_is(

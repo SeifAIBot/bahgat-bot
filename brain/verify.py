@@ -151,7 +151,10 @@ _INTERNAL_BLOCK_RES = [
 _HEBREW_RE = re.compile(r"[\u0590-\u05FF]")
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 _GREEK_RE = re.compile(r"[\u0370-\u03FF]")
-_FOREIGN_SCRIPT_RE = re.compile(r"[\u0590-\u05FF\u0400-\u04FF\u0370-\u03FFA-Za-z]")
+_CJK_RE = re.compile(r"[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]")
+_FOREIGN_SCRIPT_RE = re.compile(
+    r"[\u0590-\u05FF\u0400-\u04FF\u0370-\u03FF"
+    r"\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\uFF0CA-Za-z]")
 # Cyrillic lookalike standing in for an Arabic letter (live v1.13).
 _CONFUSABLES = {"\u0431": "ب"}  # Cyrillic small letter be → Arabic beh
 _LATIN_ALLOWLIST = frozenset(
@@ -163,9 +166,11 @@ def _strip_script_mixing(text: str) -> str:
         return text
     for conf, repl in _CONFUSABLES.items():
         text = text.replace(conf, repl)
+    text = text.replace("\uFF0C", "،")
     text = _HEBREW_RE.sub("", text)
     text = _CYRILLIC_RE.sub("", text)
     text = _GREEK_RE.sub("", text)
+    text = _CJK_RE.sub("", text)
     out = []
     for tok in text.split(" "):
         if not tok:
@@ -182,6 +187,111 @@ def _strip_script_mixing(text: str) -> str:
             if core.lower() not in _LATIN_ALLOWLIST:
                 continue
         out.append(tok)
+    return " ".join(out)
+
+
+# v1.16 — garble dictionary (persona study §(viii)(c)). The live
+# garbles are model inventions, not Bahgat's words (0 hits in 39k
+# words of his transcripts) — so the fix is a deterministic
+# dictionary built from HIS words, NEVER a generic/MSA spellchecker
+# (it would "correct" dialect into MSA — the exact wrong direction).
+# wrong form -> correct word. Matching is normalised + whole-word,
+# and both the raw and the normalised spelling of the wrong form are
+# tried (so "الباركه" and "الباركة" are both fixed).
+_GARBLE_REPLACEMENTS = {
+    "جد عين": "جدعان",
+    "صهل": "سهل",
+    "الباركة": "البركة",
+    "التصاد": "الاقتصاد",
+    "الاتصاد": "الاقتصاد",
+    "الجنرار": "الجنرال",
+    "العلام": "الإعلام",
+}
+# Flag-only (no auto-replacement): "اضمرت" is probably "اتدمرت"
+# (op-41's transcript) but it also appears in Quran-verse contexts,
+# where replacing it would corrupt a verse — so it is only flagged
+# for the handler's regen, never silently replaced.
+_GARBLE_FLAG_ONLY = ["اضمرت"]
+
+
+def _apply_garble_dictionary(text: str) -> str:
+    """Replace whole-word dictionary garbles with the correct word.
+    Single-word forms also match with an attached و- prefix
+    ("والباركة" = و + الباركة — the conjunction attaches to the
+    word in Arabic, so a plain word boundary never fires there).
+    The two-word phrase "جد عين" keeps the strict boundary: its
+    head "جد" could be the tail of "وجد" (a real word)."""
+    if not text:
+        return text
+    for wrong, right in _GARBLE_REPLACEMENTS.items():
+        forms = {wrong, normalize_arabic(wrong)}
+        left = (r"(?:(?<!\w)|(?<=و))" if " " not in wrong
+                else r"(?<!\w)")
+        for form in forms:
+            text = re.sub(
+                rf"{left}{re.escape(form)}(?!\w)", right, text)
+    return text
+
+
+def garble_flags(text: str) -> list:
+    """v1.16: does this reply contain a garble the deterministic
+    filter cannot silently fix? [] means clean.
+    - "script": the script strip would LOSE content (a mixed token,
+      a non-allowlisted Latin token, a Hebrew/Cyrillic/Greek/CJK
+      character that is not a mapped confusable) — the strip is a
+      last resort, not a silent fix; the handler regenerates once.
+    - "garble:<form>": a dictionary garble is present (including
+      "اضمرت", which is flag-only — see _GARBLE_FLAG_ONLY)."""
+    flags = []
+    if not text:
+        return flags
+    # (a) content-losing script strip: map the confusables + the
+    # fullwidth comma first (content-preserving), then compare with
+    # the strip — any difference is content the strip would lose.
+    conf_only = text
+    for conf, repl in _CONFUSABLES.items():
+        conf_only = conf_only.replace(conf, repl)
+    conf_only = conf_only.replace("\uFF0C", "،")
+    stripped = _strip_script_mixing(text)
+    if " ".join(stripped.split()) != " ".join(conf_only.split()):
+        flags.append("script")
+    # (b) dictionary garbles (normalised, whole-word; و-tolerant
+    # left boundary for single words, strict for the phrase).
+    norm = normalize_arabic(text)
+    for wrong in list(_GARBLE_REPLACEMENTS) + _GARBLE_FLAG_ONLY:
+        left = (r"(?:(?<!\w)|(?<=و))" if " " not in wrong
+                else r"(?<!\w)")
+        if re.search(
+                rf"{left}{re.escape(normalize_arabic(wrong))}(?!\w)",
+                norm):
+            flags.append(f"garble:{wrong}")
+    return flags
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!؟،,\n])\s+")
+
+
+def _dedupe_repeated_sentences(text: str) -> str:
+    """v1.16 — the Messi-defence loop (live v1.14 #14): the same long
+    sentence repeated 3x is a model loop, not emphasis — keep the
+    first occurrence only. Short sentences are exempt: a 1-3 word
+    refrain like "لحظة. لحظة. لحظة. لحظة." (the di-16 bank line) is
+    a legitimate Bahgat interrupt formula, not a loop."""
+    if not text:
+        return text
+    seen = set()
+    out = []
+    for sent in _SENTENCE_SPLIT_RE.split(text):
+        # Compare without trailing punctuation: the same clause
+        # repeated mid-sentence ("...، وهو أحسن لاعب في التاريخ،")
+        # and at the end ("... وهو أحسن لاعب في التاريخ.") is the
+        # same loop — the punctuation is not part of the content.
+        norm = normalize_arabic(sent).strip(" .!؟،,;:")
+        if len(norm.split()) >= 4:
+            if norm in seen:
+                continue
+            seen.add(norm)
+        out.append(sent)
     return " ".join(out)
 
 
@@ -228,6 +338,12 @@ def check_reply(text: str, insult_level: str = "full", owner_id=None,
     if _leaks(cleaned, owner_id):
         return False, _DEFLECTION
     cleaned = _strip_script_mixing(cleaned)
+    # v1.16: garble dictionary (deterministic replacement from his
+    # own words) + sentence-loop dedupe (a long sentence repeated 3x
+    # is a model loop — keep the first occurrence). Both run before
+    # the persona polarity filter.
+    cleaned = _apply_garble_dictionary(cleaned)
+    cleaned = _dedupe_repeated_sentences(cleaned)
     if persona_selection is not None:
         cleaned = filter_persona_polarity(cleaned, persona_selection)
     if insult_level == "personal_only" and contains_family(cleaned):

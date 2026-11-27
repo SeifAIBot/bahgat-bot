@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+    assert PROMPT_VERSION == "7.2"  # v1.16: persona-fidelity behaviour lines
 
 
 def test_system_base_v11_budget():
@@ -47,8 +47,10 @@ def test_system_base_v11_budget():
     # temperament and mockery targets block. v1.14 shrinks it back:
     # the fact blocks moved OUT into brain/persona_facts.py (atomised
     # rows, injected per turn only when the turn's topic matches) —
-    # SYSTEM_BASE keeps style/rules only. Budget < 1800 again.
-    assert len(SYSTEM_BASE) < 1800
+    # SYSTEM_BASE keeps style/rules only. Budget < 1800 again. v1.16
+    # grows it to < 2000 for the four persona-fidelity behaviour
+    # lines (answer-first, catalogue rant, honest scoping, Sisi rule).
+    assert len(SYSTEM_BASE) < 2000
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
                  "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>",
                  "إنسان عادي", "مش بوت"):
@@ -194,8 +196,9 @@ def test_prompt_size_reported(capsys):
     # for the cause + tastes block. v1.12 batch 3: < 3600 for the
     # tech tastes, temperament and mockery targets block. v1.14:
     # facts atomised out of SYSTEM_BASE (brain/persona_facts.py) —
-    # budget < 1800 again.
-    assert len(SYSTEM_BASE) < 1800
+    # budget < 1800 again. v1.16: four persona-fidelity behaviour
+    # lines — budget < 2000.
+    assert len(SYSTEM_BASE) < 2000
 
 
 def test_memory_block_unchanged():

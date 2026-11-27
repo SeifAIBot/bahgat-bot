@@ -138,7 +138,7 @@ def test_opinion_ask_detection():
 
 
 def test_prompt_version_and_stance():
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+    assert PROMPT_VERSION == "7.2"  # v1.16: persona-fidelity behaviour lines
     # Behaviour-as-verbs + agenda + anti-softening (research method #3).
     assert "بيرد على الشتيمة بشتيمة أقوى" in SYSTEM_BASE
     assert "عندك رأي في كل حاجة" in SYSTEM_BASE
@@ -296,11 +296,12 @@ def test_bank_loads_and_excludes_risky_lines():
     }
     # v1.6 phase 1: 224 entries in the file minus 10 approximate (never served)
     # minus the 2 blocked hedges (op-05, op-30) = 212 served.
-    assert sum(len(v) for v in bank.values()) == 212
-    assert len(bank["insulted"]) == 44
-    assert len(bank["roast"]) == 45
+    # v1.16: 241 entries (+17 study lines) = 229 served.
+    assert sum(len(v) for v in bank.values()) == 229  # v1.16: +17 served
+    assert len(bank["insulted"]) == 45  # v1.16: in-46 added
+    assert len(bank["roast"]) == 46  # v1.16: ro-47 added
     assert len(bank["joke_request"]) == 10
-    assert len(bank["opinion_asked"]) == 31
+    assert len(bank["opinion_asked"]) == 45  # v1.16: op-36..op-49 added
     assert len(bank["challenge"]) == 36
     assert len(bank["condolence"]) == 1
     assert len(bank["greeting"]) == 4
@@ -314,9 +315,9 @@ def test_bank_loads_and_excludes_risky_lines():
     _bank_path = _Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml"
     with open(_bank_path, encoding="utf-8") as f:
         raw = _yaml.safe_load(f)["entries"]
-    assert len(raw) == 224
-    _broad = ["ابن", "ولد", "ولاد", "ام", "أم", "ابو", "أبو",
-              "عيله", "بنت", "مرات", "حفيد", "جد"]
+    assert len(raw) == 241  # v1.16: +17 study lines
+    _broad = ["ابن", "يبن", "ولد", "ولاد", "ام", "أم", "ابو", "أبو",
+              "عيله", "بنت", "مرات", "المرة", "حفيد", "جد"]
     for e in raw:
         line = e["line"]
         if _is_family(line):

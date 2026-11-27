@@ -98,23 +98,56 @@ from brain import memory as _memory
 from brain import mood as _mood_mod
 from brain import prompt as _prompt_mod
 from brain import telemetry as _telemetry
-from brain.intent import detect_fast_reply, detect_insult_situation, detect_intent, detect_prefix_mode, looks_like_deep_question, looks_like_insult, looks_like_insult_turn, looks_like_opinion_ask, looks_stalling, looks_unknown
+from brain.intent import (
+    detect_fast_reply,
+    detect_insult_situation,
+    detect_intent,
+    detect_prefix_mode,
+    looks_like_deep_question,
+    looks_like_fear_question,
+    looks_like_insult,
+    looks_like_insult_turn,
+    looks_like_opinion_ask,
+    looks_stalling,
+    looks_unknown,
+)
 from brain.reply_bank import (
     INGREDIENT_CATEGORIES,
     RefusalOutcome,
     ingredient_in_reply,
+    is_canned_deflection,
     is_refusal_or_deflection,
     is_standalone_line,
     looks_like_challenge,
     match_reply_bank_categorized,
+    pick_dismiss_line,
+    roast_fallback_reply,
     weave_about_target,
 )
 from brain.memory import add_message, get_member, recent_messages, save_member
 from brain.mood import SITUATION_MOOD_BUMP, update_mood
-from brain.persona_facts import facts_message, instruction_message, select_facts
-from brain.prompt import bank_ingredient_block, build_system_prompt, temperature_for
+from brain.persona_facts import (
+    deep_fallback_line,
+    facts_message,
+    instruction_message,
+    reply_names_fear,
+    select_facts,
+)
+from brain.prompt import (
+    bank_ingredient_block,
+    build_system_prompt,
+    deep_variant_block,
+    style_rag_message,
+    temperature_for,
+)
 from brain.router import BrainRouter
-from brain.verify import check_reply, escape_html, split_message, voice_check
+from brain.verify import (
+    check_reply,
+    escape_html,
+    garble_flags,
+    split_message,
+    voice_check,
+)
 from core import rules as _rules_mod
 from core.config import data_dir
 from core.persona import load_examples, load_persona
@@ -130,6 +163,9 @@ DB_PATH = data_dir() / "bahgat.db"
 
 _PERSONA = load_persona()
 _EXAMPLES = load_examples()
+# v1.16 — Style RAG: ALL pairs from examples.md (11, not the 8 the
+# static prefix caps at), sampled diversely per just_chat turn.
+_EXAMPLES_ALL = load_examples(max_n=50)
 
 # --- in-memory state (bounded; pruned on use) -------------------------------
 _last_send: dict[int, float] = {}
@@ -807,14 +843,16 @@ def _build_memory_block(member, mood: int) -> str:
 
 def _build_system_prompt(member, mood, search_text, insult_level, target_name,
                          bank_ingredient=None, bank_target=None,
-                         bank_requester=None, bank_kind="roast"):
+                         bank_requester=None, bank_kind="roast",
+                         deep_variant=False):
     """Try the v0.5 prompt signature, fall back to v0.4 and append the rule.
     The v0.5 prompt has no "owner" level, so the never-insult-Seif guardrail
     is always appended here when the target is the owner.
     v1.11: bank_ingredient (a picked bank insult line) is forwarded so
     the LLM weaves it into the reply; the fallback branches append the
     same block by hand. v1.13: target/requester/kind ride along so the
-    block names who is roasted and who asked."""
+    block names who is roasted and who asked. v1.16: deep_variant
+    forwards the deep-question prompt variant (fear facts first)."""
     try:
         system = build_system_prompt(
             persona=_PERSONA,
@@ -828,6 +866,7 @@ def _build_system_prompt(member, mood, search_text, insult_level, target_name,
             bank_target=bank_target,
             bank_requester=bank_requester,
             bank_kind=bank_kind,
+            deep_variant=deep_variant,
         )
     except TypeError:
         try:
@@ -836,6 +875,8 @@ def _build_system_prompt(member, mood, search_text, insult_level, target_name,
             )
         except TypeError:  # very old signature without style_examples
             system = build_system_prompt(member=member, mood=mood, search_text=search_text)
+        if deep_variant:
+            system += "\n\n" + deep_variant_block()
         if insult_level == "personal_only":
             system += (
                 "\n[INSULT RULE] الهدف عضو في الجروب: الشتيمة لشخصه بس، "
@@ -871,6 +912,20 @@ def _check_reply_guarded(reply: str, insult_level: str, owner_id: int,
         if contains_family_insult(cleaned) or looks_like_insult(cleaned):
             return False, "سيف ده صاحبي يا عم، مش هشتمه."
     return ok, cleaned
+
+
+def _dismiss_fallback_line(chat_id: int, user_id: int | None = None) -> str:
+    """v1.16 — the empty-reply / canned-deflection fallback: a random
+    member-safe dismiss-category bank line. NEVER the canned line
+    ("مش داخل دماغي" — it became a general dodge, live v1.14/v1.15)
+    and never _TURN_ERROR (a technical-error line for a normal turn
+    is a bot tell). The hardcoded line is the last resort when the
+    dismiss pool is empty."""
+    try:
+        line = pick_dismiss_line(chat_id, user_id=user_id)
+    except Exception:
+        line = None
+    return line or "يا عم، خلاص، سيبك من الموضوع ده."
 
 
 async def _router_chat(router, messages, hard: bool, temperature: float,
@@ -1807,9 +1862,10 @@ async def _handle_owner_command(msg, user, text, context, settings) -> bool:
 
 
 async def _do_reload(msg, context) -> bool:
-    global _PERSONA, _EXAMPLES
+    global _PERSONA, _EXAMPLES, _EXAMPLES_ALL
     _PERSONA = load_persona()
     _EXAMPLES = load_examples()
+    _EXAMPLES_ALL = load_examples(max_n=50)
     try:
         import yaml
 
@@ -1960,7 +2016,9 @@ async def on_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_diag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """v1.15 owner-only /diag: the last 10 slow turns + per-provider
     p50/p95 from the telemetry tables (research report §2.3).
-    Non-owners get nothing (same rule as /stats)."""
+    Non-owners get nothing (same rule as /stats). v1.16: a telemetry
+    DB error replies with an error line instead of silence — the
+    owner must never see a command die quietly."""
     msg = update.effective_message
     user = update.effective_user
     settings = context.application.bot_data.get("settings")
@@ -1968,22 +2026,29 @@ async def on_diag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not is_owner(user.id, settings.owner_id):
         return
-    lines = ["تشخيص (آخر 10 أدوار بطيئة):"]
-    slow = _telemetry.recent_slow_turns(limit=10)
-    if not slow:
-        lines.append("مفيش أدوار بطيئة مسجلة.")
-    for t in slow:
-        lines.append(
-            f"- {t['turn_id']} {t.get('kind') or '?'}: "
-            f"{int(t['total_ms'])}ms، {t['calls']} مكالمات، {t['outcome']}")
-    stats = _telemetry.provider_latency_stats()
-    if stats:
-        lines.append("المزودين (p50/p95):")
-        for s in stats:
+    try:
+        lines = ["تشخيص (آخر 10 أدوار بطيئة):"]
+        slow = _telemetry.recent_slow_turns(limit=10)
+        if not slow:
+            lines.append("مفيش أدوار بطيئة مسجلة.")
+        for t in slow:
             lines.append(
-                f"- {s['provider']}: {s['calls']} مكالمات، "
-                f"p50={s['p50_ms']}ms، p95={s['p95_ms']}ms")
-    await msg.reply_text("\n".join(lines[:20]))
+                f"- {t['turn_id']} {t.get('kind') or '?'}: "
+                f"{int(t['total_ms'])}ms، {t['calls']} مكالمات، {t['outcome']}")
+        stats = _telemetry.provider_latency_stats()
+        if stats:
+            lines.append("المزودين (p50/p95):")
+            for s in stats:
+                lines.append(
+                    f"- {s['provider']}: {s['calls']} مكالمات، "
+                    f"p50={s['p50_ms']}ms، p95={s['p95_ms']}ms")
+        await msg.reply_text("\n".join(lines[:20]))
+    except Exception:
+        logger.exception("on_diag failed")
+        try:
+            await msg.reply_text("التشخيص مش شغال دلوقتي، جرب تاني.")
+        except Exception:
+            pass
 
 
 # --- my_chat_member ---------------------------------------------------------
@@ -2213,6 +2278,21 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     _persona_selection = (
         select_facts(text) if intent_early in ("just_chat", "voice") else None
     )
+    # v1.16 — the deep-question router: a personal/deep question on a
+    # just_chat/voice turn uses the separate deep prompt variant
+    # (roast OFF, the grounded fear facts first — see _run_llm_turn
+    # below). The deep variant OWNS the grounding, so the <facts>
+    # note is skipped on deep turns (no double injection).
+    _is_deep = (
+        looks_like_deep_question(text)
+        and intent_early in ("just_chat", "voice")
+    )
+    # v1.16: the fear containment (below) applies only when the
+    # question is ABOUT fear — a happiness/regret/dream answer must
+    # not be replaced by a fear line.
+    _is_fear_question = looks_like_fear_question(text)
+    if _is_deep:
+        _persona_selection = None
     # v1.1 reply bank: Bahgat's REAL lines (persona/bahgat/reply_bank.yaml).
     # v1.11 (Seif 2026-11-27): INSULT lines (insulted + roast) are
     # INGREDIENTS, never standalone replies — a picked line is stashed
@@ -2277,8 +2357,11 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 _bank_ingredient = bank
                 _bank_kind = _bank_category
                 # v1.15: the bounded wrapper sends this line verbatim
-                # if the turn deadline fires.
+                # if the turn deadline fires. v1.16: it also needs the
+                # target, so the timeout fallback names it (same
+                # roast_fallback_reply as the other fallbacks).
                 turn_ctx["bank_line"] = bank
+                turn_ctx["bank_kind"] = _bank_category
                 # v1.13: the weave needs the target — the resolved name
                 # when the roast was resolved, else the raw extraction.
                 # Insulted comebacks are about the sender by
@@ -2286,6 +2369,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 # coherence gate is skipped for them.
                 if _bank_category == "roast":
                     _bank_target = _tname or _extract_insult_target(text)
+                    turn_ctx["bank_target"] = _bank_target
                 logger.info(
                     "bank_ingredient=true category=%s mood=%s user_id=%s chat_id=%s",
                     _bank_category, mood_early, user.id, chat_id,
@@ -2357,7 +2441,9 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 cached, "full", settings.owner_id,
                 persona_selection=_persona_selection)
             if not reply.strip():
-                reply = "يا عم، الكلام ده مش داخل دماغي، قول حاجة عدلة."
+                # v1.16: never the canned line — it became a general
+                # dodge (live v1.14/v1.15). A dismiss bank line instead.
+                reply = _dismiss_fallback_line(chat_id, user.id)
             member_early["username"] = user.username or ""
             member_early["first_name"] = user.first_name or ""
             member_early["mood"] = mood_early
@@ -2529,7 +2615,8 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             await status.set_stage("thinking")
 
         system = _build_system_prompt(member, member["mood"], search_text, insult_level, target_name,
-                                      bank_ingredient=_bank_ingredient, bank_target=_bank_target, bank_requester=user.first_name, bank_kind=_bank_kind or "roast")
+                                      bank_ingredient=_bank_ingredient, bank_target=_bank_target, bank_requester=user.first_name, bank_kind=_bank_kind or "roast",
+                                      deep_variant=_is_deep)
         memory_block = _build_memory_block(member, member["mood"])
         user_text = (text or "")[:1000]
         # v1.1: opinion questions get the stance note (see _OPINION_NOTE)
@@ -2558,6 +2645,16 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
               "content": instruction_message(_persona_selection)}]
             if _persona_selection is not None else []
         )
+        # v1.16 — Style RAG (minimal, persona-fidelity report §3):
+        # 3-5 DIVERSE real Bahgat replies as few-shot for this
+        # just_chat turn, sampled by turn_id — NEVER topically
+        # matched to the question. Deep turns skip it (the deep
+        # variant already carries its own few-shot answers).
+        _style_msg = (
+            style_rag_message(_EXAMPLES_ALL, n=4, seed=turn_id)
+            if intent == "just_chat" and not _is_deep else None
+        )
+        style_note = [_style_msg] if _style_msg is not None else []
         messages = (
             [{"role": "system", "content": system}]
             + history
@@ -2567,6 +2664,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             + instruction_note
             + opinion_note
             + deep_note
+            + style_note
             + [{"role": "user", "content": _SANDWICH}]
         )
         hard = intent == "search"
@@ -2602,7 +2700,29 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         # the elif fire instead and produce _SEARCH_EMPTY with no
         # search at all (search_text is "" there, so no passages).
         insult_turn = looks_like_insult_turn(text)
-        if unanswered and not search_ran and intent not in ("search", "voice") and not insult_turn:
+        # v1.16 — the search misroute (live v1.15 retest Task B #4):
+        # a short follow-up riff on the previous turn ("ده حلم ولا
+        # كابوس؟") is just_chat, not an information need — its first
+        # reply stands, no search runs, and _SEARCH_EMPTY is never
+        # produced. A short message WITH a search signal (detect_intent
+        # says "search") is not a riff and still retries, and a short
+        # message with no history is not a follow-up either.
+        # v1.16: the trigger words ("يا بهجت") do not count toward the
+        # follow-up length — the live riff "يا بهجت ده حلم ولا كابوس؟"
+        # is 6 words raw but 4 words of content, and the gate missed
+        # it (the `elif` below then replaced the reply with the
+        # search-failure line). A reply to the bot's message carries
+        # no trigger and counts as-is.
+        _riff_text = (text or "").strip()
+        for _trigger in ("يا بهجت", "بهجت"):
+            if _riff_text.startswith(_trigger):
+                _riff_text = _riff_text[len(_trigger):].strip()
+                break
+        _is_riff = (
+            intent == "just_chat" and bool(history)
+            and len(_riff_text.split()) <= _FOLLOWUP_MAX_WORDS
+        )
+        if unanswered and not search_ran and intent not in ("search", "voice") and not insult_turn and not _is_riff:
             # v1.0: a just_chat turn that needs a search starts the
             # bubble here (it never went up for plain chat) — slow work
             # is what the bubble is for.
@@ -2637,11 +2757,15 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 reply = _search_failure_line()
                 reply_is_fallback = True
                 _record_unknown_retry(rescued=False)
-        elif unanswered and intent != "voice" and not insult_turn:
+        elif unanswered and intent != "voice" and not insult_turn and not _is_riff:
             # Search already ran (or failed) and the reply is still
             # unanswered. When passages exist, one firm retry from the
             # grounding, then the extractive fallback; when nothing was
             # found, say so plainly — in this turn, not "later".
+            # v1.16: the riff guard belongs here too — the first `if`
+            # is skipped for riffs (no search), but this `elif` fired
+            # anyway and replaced the riff's first reply with the
+            # search-failure line (the live v1.15 Task B #4 defect).
             passages = _search_passages(search_text)
             if passages:
                 system2 = _build_system_prompt(member, member["mood"], search_text, insult_level, target_name,
@@ -2690,7 +2814,8 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 # already carry their own outcomes in llm_calls —
                 # "blocked_400" when the last attempt answered 400 —
                 # so nothing is regraded here.)
-                reply = _bank_ingredient
+                # v1.16: the fallback names the target (roast only).
+                reply = roast_fallback_reply(_bank_ingredient, _bank_target)
                 turn_ctx["outcome"] = "bank_sent"
                 turn_ctx["reply_preview"] = reply[:80]
                 logger.warning(
@@ -2729,13 +2854,111 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                                 turn_id, "roast_retry", "fallback_rescued")
                             turn_ctx["outcome"] = "fallback_rescued"
                     if not _rescued:
-                        reply = _bank_ingredient
+                        # v1.16: the fallback names the target.
+                        reply = roast_fallback_reply(_bank_ingredient, _bank_target)
                         turn_ctx["outcome"] = "bank_sent"
                         turn_ctx["reply_preview"] = reply[:80]
                         logger.warning(
                             "roast refusal unrescued; bank fallback sent "
                             "verbatim user_id=%s chat_id=%s",
                             user.id, chat_id)
+
+        # v1.16 — deep-turn containment (FEAR questions only): the
+        # reply must name at least one of the grounded fears
+        # (reply_names_fear). A dodge ("أنا مش خايف من حاجة") or a
+        # deflection names none of them — send a pre-written sincere
+        # fallback line verbatim instead of retrying the LLM (no
+        # second LLM call on the happy path, and a retry would just
+        # dodge again). The fallback is one of the two sample answers
+        # from the deep variant, picked by turn_id. DEVIATION from
+        # the v116 spec (which scoped the containment to all deep
+        # turns): a happiness/regret/dream question answered sincerely
+        # ("أنا مبسوط") names no fear and must NOT be replaced by a
+        # fear line — the deep variant (honesty > joke) owns those
+        # turns, the containment owns fear questions only.
+        if _is_deep and _is_fear_question and not reply_is_fallback:
+            if not reply_names_fear(reply):
+                reply = deep_fallback_line(turn_id)
+                reply_is_fallback = True
+                turn_ctx["outcome"] = "deep_fallback"
+                turn_ctx["reply_preview"] = reply[:80]
+                logger.warning(
+                    "deep turn dodged; sincere fallback sent "
+                    "user_id=%s chat_id=%s", user.id, chat_id)
+
+        # v1.16 — garble reject-and-regenerate (persona-fidelity
+        # report §2): a draft the deterministic filter cannot
+        # silently fix (script-mixing that loses content, or a
+        # dictionary garble) gets ONE regen with a vary instruction.
+        # If the regen is still garbled, the stripped reply goes out
+        # (check_reply below cleans what it can) — the turn does not
+        # burn a second regen on it. Ingredient turns skip this:
+        # their containment retry owns the turn's one fallback call
+        # under the 2-call budget (the same reason the voice regen
+        # skips them).
+        _gflags = garble_flags(reply)
+        if (
+            intent in ("just_chat", "voice")
+            and not reply_is_fallback
+            and _bank_ingredient is None
+            and _gflags
+        ):
+            logger.warning(
+                "garble flags=%s intent=%s user_id=%s chat_id=%s",
+                ",".join(_gflags), intent, user.id, chat_id,
+            )
+            _garble_messages = list(messages) + [{
+                "role": "user",
+                "content": (
+                    "الرد ده فيه كلمات مكسرة أو حروف غريبة — أعد كتابته "
+                    "بكلمات عربية سليمة، بنفس المعنى والأسلوب."
+                ),
+            }]
+            reply2, provider2, _t2 = await _router_chat(
+                router, _garble_messages, hard=False,
+                temperature=temperature_for(intent),
+                cheap_only=cheap_only, intent=intent,
+                budget=budget, turn_id=turn_id, step="garble_regen",
+            )
+            if reply2.strip():
+                reply, provider = reply2, provider2
+
+        # v1.16 — the canned deflection as a GENERAL dodge (live
+        # v1.14/v1.15 retests: the same line fires on normal just_chat
+        # turns, where v1.15's roast-path-only detector never sees
+        # it). On an exact canned match, ONE regen with an instruction
+        # to answer the actual question; if it still deflects (or the
+        # call budget is spent), send a random member-safe dismiss
+        # bank line — never the canned line, never _TURN_ERROR.
+        if (
+            intent in ("just_chat", "voice")
+            and not reply_is_fallback
+            and _bank_ingredient is None
+            and is_canned_deflection(reply)
+        ):
+            logger.warning(
+                "canned deflection on chat turn; regenerating once "
+                "user_id=%s chat_id=%s", user.id, chat_id)
+            _canned_messages = list(messages) + [{
+                "role": "user",
+                "content": (
+                    "جاوب على السؤال نفسه بصراحة وبأسلوب بهجت — متقولش "
+                    "إن الكلام مش داخل دماغك."
+                ),
+            }]
+            reply2, provider2, _t2 = await _router_chat(
+                router, _canned_messages, hard=False,
+                temperature=temperature_for(intent),
+                cheap_only=cheap_only, intent=intent,
+                budget=budget, turn_id=turn_id, step="canned_regen",
+            )
+            if reply2.strip() and not is_canned_deflection(reply2):
+                reply, provider = reply2, provider2
+            else:
+                reply = _dismiss_fallback_line(chat_id, user.id)
+                reply_is_fallback = True
+                turn_ctx["outcome"] = "canned_fallback"
+                turn_ctx["reply_preview"] = reply[:80]
 
         # v1.1 voice check (research method #4): a just_chat/voice reply
         # that comes out polite, Fusha, apologetic, or restating the
@@ -2753,11 +2976,15 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         # 2-call budget, and the voice regen would consume it and
         # starve the containment retry (the same reason the opener
         # regen already skips ingredient turns).
+        # v1.16: skipped for deep turns — a sincere answer at high
+        # mood would be flagged "angry_turn_came_out_polite" and
+        # regened aggressive, undoing the deep variant.
         if (
             intent in ("just_chat", "voice")
             and not reply_is_fallback
             and not search_ran
             and _bank_ingredient is None
+            and not _is_deep
             and not re.search(r"\[\d+\]", reply)
         ):
             _flags = voice_check(
@@ -2835,14 +3062,21 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                     "user_id=%s chat_id=%s", user.id, chat_id)
             elif _bank_kind == "roast" and not weave_about_target(
                     reply, _bank_target,
-                    _requester_names(user, settings.owner_id)):
+                    _requester_names(user, settings.owner_id),
+                    line=_bank_ingredient):
                 # Misdirected weave: the reply is about the requester,
                 # not the target. Discard the draft, send the line.
+                # v1.16: the fallback names the target (vocative
+                # prefix; the line text stays verbatim after it) and
+                # the gate is sentence-aware — a line aimed at the
+                # requester in the sentence containing it is
+                # misdirected even when the target is named elsewhere
+                # in the reply (live v1.14 #11).
                 logger.warning(
                     "weave_misdirected target=%s; sending line verbatim "
                     "user_id=%s chat_id=%s",
                     _bank_target, user.id, chat_id)
-                reply = _bank_ingredient
+                reply = roast_fallback_reply(_bank_ingredient, _bank_target)
 
         # v1.13: opener variety — if the draft opens with the same
         # vocative as the bot's previous reply in this chat, regenerate
@@ -2880,7 +3114,9 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             reply, insult_level, settings.owner_id,
             persona_selection=_persona_selection)
         if not reply.strip():
-            reply = "يا عم، الكلام ده مش داخل دماغي، قول حاجة عدلة."
+            # v1.16: never the canned line — it became a general dodge
+            # (live v1.14/v1.15). A dismiss bank line instead.
+            reply = _dismiss_fallback_line(chat_id, user.id)
         turn_ctx["reply_preview"] = reply[:80]
         add_message(chat_id, context.bot.id, "assistant", reply)
         # v0.6: store fresh just_chat replies for later exact-match hits.
@@ -3030,6 +3266,11 @@ async def _run_llm_turn_bounded(update, context, msg, user, chat_id, text, setti
         outcome = "timeout"
         if not turn_ctx.get("replied"):
             line = turn_ctx.get("bank_line")
+            # v1.16: the timeout fallback names the target too (roast
+            # turns only — the line is a roast ingredient there).
+            if line and turn_ctx.get("bank_kind") == "roast":
+                line = roast_fallback_reply(
+                    line, turn_ctx.get("bank_target"))
             try:
                 await _send_text(msg, line if line else _TURN_ERROR)
             except Exception:
@@ -3308,11 +3549,19 @@ def register_handlers(app: Application, settings):
     app.bot_data["router"] = BrainRouter(settings)
     app.bot_data.setdefault("yt_requests", {})
     _telemetry.init_telemetry()
+    # v1.16 — the CommandHandlers MUST come before the MessageHandlers:
+    # all handlers are group 0, so the first matching handler wins,
+    # and a "/diag" text message matches filters.TEXT too. Before
+    # this, on_group_message consumed "/diag" (and "/stats") first and
+    # the trigger gate dropped it silently — the v1.15 live retest
+    # got NO REPLY from /diag. Commands are a different update shape
+    # from callbacks/chat-member events, so their relative order to
+    # those two does not matter.
+    app.add_handler(CommandHandler("stats", on_stats))
+    app.add_handler(CommandHandler("diag", on_diag))
+    app.add_handler(CommandHandler("reload", on_reload_command))
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS, on_group_message))
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, on_group_message))
     app.add_handler(CallbackQueryHandler(on_callback, pattern=r"^yt:(video|audio)$"))
     app.add_handler(CallbackQueryHandler(on_yt_pick, pattern=r"^yt:pick:\d+$"))
-    app.add_handler(CommandHandler("stats", on_stats))
-    app.add_handler(CommandHandler("diag", on_diag))
-    app.add_handler(CommandHandler("reload", on_reload_command))
     app.add_handler(ChatMemberHandler(on_my_chat_member, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))

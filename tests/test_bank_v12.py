@@ -81,11 +81,11 @@ def test_bank_v12_counts():
         "joke_request", "dismiss", "challenge", "search_fetch",
         "roast", "condolence",
     }
-    assert sum(len(v) for v in bank.values()) == 212
+    assert sum(len(v) for v in bank.values()) == 229  # v1.16: +17 served
     assert {k: len(v) for k, v in bank.items()} == {
-        "catchphrase": 24, "greeting": 4, "insulted": 44,
-        "opinion_asked": 31, "joke_request": 10, "dismiss": 15,
-        "challenge": 36, "search_fetch": 2, "roast": 45,
+        "catchphrase": 24, "greeting": 4, "insulted": 45,
+        "opinion_asked": 45, "joke_request": 10, "dismiss": 16,
+        "challenge": 36, "search_fetch": 2, "roast": 46,
         "condolence": 1,
     }
     # Every entry has source + trigger + confidence marking.
@@ -94,7 +94,7 @@ def test_bank_v12_counts():
     raw = yaml.safe_load(open(
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
-    assert len(raw) == 224
+    assert len(raw) == 241  # v1.16: +17 study lines
     for e in raw:
         assert e["id"] and e["trigger"] and e["line"] and e["source"]
         assert e["confidence"] in ("verbatim", "cleaned", "approximate", "user")
@@ -110,10 +110,10 @@ def test_bank_family_lines_all_tagged():
     raw = yaml.safe_load(open(
         Path(__file__).resolve().parents[1] / "persona/bahgat/reply_bank.yaml",
         encoding="utf-8"))["entries"]
-    broad = ["ابن", "ولد", "ولاد", "ام", "أم", "ابو", "أبو", "عيله",
-             "بنت", "مرات", "حفيد", "جد"]
+    broad = ["ابن", "يبن", "ولد", "ولاد", "ام", "أم", "ابو", "أبو", "عيله",
+             "بنت", "مرات", "المرة", "حفيد", "جد"]
     tagged = [e for e in raw if e.get("member_safe") is False]
-    assert len(tagged) == 17  # 14 transcript family lines + ro-40, ro-42, ro-44 (user)
+    assert len(tagged) == 19  # 14 transcript family lines + ro-40, ro-42, ro-44 (user) + in-46, ro-47 (v1.16 study)
     for e in raw:
         if contains_family_insult(e["line"]):
             assert e.get("member_safe") is False, e["id"]
@@ -144,7 +144,7 @@ def test_roast_member_target_gets_person_only_lines():
 
 def test_roast_non_member_target_may_serve_family_lines():
     false_lines = _roast_lines(member_safe_only=False) - _roast_lines(True)
-    assert len(false_lines) == 15  # 12 transcript + ro-40, ro-42, ro-44 (user)
+    assert len(false_lines) == 16  # 12 transcript + ro-40, ro-42, ro-44 (user) + ro-47 (v1.16 study)
     seen = {
         match_reply_bank(
             "يا بهجت اشتم السيسي", chat_id=CHAT_ID, target_is_member=False)
@@ -204,8 +204,12 @@ def test_opinion_pool_serves_non_member_lines(monkeypatch):
     # Opinion lines are ABOUT السيسي/التكفير (non-member subjects), so
     # the pool is not member-restricted: op-35 (d-12, family insult at
     # a thieving ruler compared to Sisi) must be reachable.
+    # v1.16: the pool grew by 14 study lines, so the old "pick the
+    # last entry" trick no longer lands on op-35 — pick it by id.
     reload_bank()
-    monkeypatch.setattr(rb.random, "choice", lambda xs: xs[-1])
+    monkeypatch.setattr(
+        rb.random, "choice",
+        lambda xs: next((e for e in xs if e["id"] == "op-35"), xs[0]))
     assert _pick("opinion_asked", CHAT_ID, member_safe_only=False) == (
         "ابن الوسخة اللي سرق المال زي السيسي كده")
     assert _pick("opinion_asked", CHAT_ID, member_safe_only=True) != (

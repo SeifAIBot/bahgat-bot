@@ -82,7 +82,7 @@ def test_situations_yaml_shape():
     served = [e for e in raw
               if e["trigger"] in ("insulted", "roast")
               and e.get("confidence") != "approximate"]
-    assert len(served) == 89  # 44 insulted + 45 roast
+    assert len(served) == 91  # 45 insulted + 46 roast (v1.16: in-46 + ro-47)
     for e in served:
         tags = e.get("situations")
         assert tags, f"{e['id']} has no situations tag"
@@ -109,12 +109,12 @@ def test_situations_per_situation_counts():
     ro = Counter(t for e in _raw() if e["trigger"] == "roast"
                  for t in e.get("situations") or [])
     assert dict(ins) == {
-        "general": 11, "mocked": 10, "dismissed": 8, "sworn-at": 6,
+        "general": 11, "mocked": 10, "dismissed": 9, "sworn-at": 6,
         "called-dumb": 4, "family-attacked": 4, "repeated-insult": 4,
         "threatened": 3,
     }
     assert dict(ro) == {
-        "general": 18, "perv": 14, "stupid-statement": 9,
+        "general": 19, "perv": 14, "stupid-statement": 9,
         "arrogant": 4, "annoying": 2,
     }
     # cowardly has no tagged line yet — it falls back to `general`.

@@ -4,7 +4,7 @@ from brain.prompt import (
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+    assert PROMPT_VERSION == "7.2"  # v1.16: persona-fidelity behaviour lines
 
 
 def test_search_requires_citations():

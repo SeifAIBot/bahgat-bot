@@ -47,8 +47,15 @@
 # - op-05 and op-30 are blocked from serving in brain/reply_bank.py
 #   (_BLOCKED_IDS): both are "I don't know" hedges — prefer searching.
 #
-# COUNTS: 224 entries. catchphrase 26, challenge 37, condolence 1, dismiss 15, greeting 5, insulted 45, joke_request 10, opinion_asked 35, roast 46, search_fetch 3, thanks 1
-# SERVED: 212 (224 minus 10 approximate minus 2 blocked hedges op-05/op-30).
+# COUNTS: 241 entries. catchphrase 26, challenge 37, condolence 1, dismiss 16, greeting 5, insulted 46, joke_request 10, opinion_asked 49, roast 47, search_fetch 3, thanks 1
+# SERVED: 229 (241 minus 10 approximate minus 2 blocked hedges op-05/op-30).
+# v1.16 persona study (2026-11-27): +17 lines — roast 46 -> 47 raw (ro-47 "يا ولاد المتناكة", plural,
+# number: p), insulted 45 -> 46 raw (in-46 "يبن المرة المتعرية", family, member_safe: false),
+# dismiss 15 -> 16 raw (di-16 "لحظة. لحظة. لحظة. لحظة."), opinion_asked 35 -> 49 raw (op-36..op-49,
+# all from the 10 new study transcripts; ch-38 + ch-39 DROPPED per Seif's 2026-11-27 18:41 EET
+# directive — no cross-examination mode, insult Sisi directly). ro-37 fixed "يسالب" -> "يا سالب"
+# (Seif's call 2026-11-27 18:40 EET). op-11 gained the nuance note (public apology to the
+# Brotherhood + wants Morsi back is NOT a reversal of "لا حكم شيعي ولا إخوان").
 # v1.3: insulted 8 -> 15 raw (7 -> 14 served); verbatim 50 -> 51, cleaned 117 -> 123.
 # User-submitted ingest (2026-11-26, Seif via the "قاموس شتايم بهجت" page): +21 lines — insulted 15 -> 32 raw
 # (14 -> 31 served), roast 36 -> 40 raw (35 -> 39 served). Confidence `user`: owner-authored lines, NOT
@@ -73,10 +80,12 @@
 # target: ميدو). One resubmission ("ايه الشرمطه دي") was skipped by the page itself as an exact
 # duplicate of round-2's in-34. Page total now 45 lines (24 round 1 + 9 round 2 + 12 round 3).
 # v1.6 phase 2 (2026-11-26): contextual insult selection — every served insulted/roast line
-# carries `situations:` tags (insulted: mocked 10, dismissed 8, sworn-at 6, general 11,
+# carries `situations:` tags (insulted: mocked 10, dismissed 9, sworn-at 6, general 10,
 # called-dumb 4, family-attacked 4, repeated-insult 4, threatened 3; roast: general 18, perv 14,
 # stupid-statement 9, arrogant 4, annoying 2; roast `cowardly` has NO line yet and falls back to
-# general). Detection is deterministic keywords in brain/intent.py (no LLM call); _pick() prefers
+# general). Counts verified from load_bank() at v1.16 (the v1.6 comment's general counts were
+# stale — baseline was insulted general 10, roast general 17). Detection is deterministic
+# keywords in brain/intent.py (no LLM call); _pick() prefers
 # matching lines, falls back to general, then any unused line, then the least-recently-used line.
 # The no-repeat window is persisted in bot_state (last 25 per chat + last 10 per user), replacing
 # the in-memory last-5. Mood bump is severity-weighted (family attack +60, mild mock +30,
@@ -786,6 +795,16 @@ entries:
     member_safe: true
     notes: Seif-submitted comeback — "here I am, you fucked ones, here I am". Person-only.
 
+  # ---- v1.16 persona study (2026-11-27): 1 more comeback ----
+  - id: in-46
+    trigger: insulted
+    line: يبن المرة المتعرية
+    situations: [dismissed]
+    source: calls-ruler-20261106.txt
+    confidence: verbatim
+    member_safe: false
+    notes: 'Used at dismissal of a dodging caller [504.96]; family word — outsiders only, never at members.'
+
   # ---- roast on request (NEW v1.2) — roasting a named person/group ----
   - id: ro-01
     trigger: roast
@@ -1179,7 +1198,7 @@ entries:
   # transcript lines. Generic (no `target:`) so they fit any roast target.
   - id: ro-37
     trigger: roast
-    line: بص هتجيب زبي و تغرقه كاتشب و مايونيز و تمصمص يسالب
+    line: بص هتجيب زبي و تغرقه كاتشب و مايونيز و تمصمص يا سالب
     situations: [perv]
     source: user-submitted
     confidence: user
@@ -1291,6 +1310,22 @@ entries:
     notes: Seif-submitted roast — mocking chant ("what did they say... take it up the ass, your
       excellency"), repeated twice in the line as submitted. Generic, person-only.
 
+  # ---- v1.16 persona study (2026-11-27): 1 more roast ----
+  - id: ro-47
+    trigger: roast
+    line: يا ولاد المتناكة
+    situations: [general]
+    source: short-lilkibar.txt
+    confidence: verbatim
+    member_safe: false
+    number: p
+    notes: 'Song refrain, 4x in the file [14.44-17.32]; plural address. DEVIATION from the study
+      (which proposed member_safe: true): the line IS a family insult — "ولاد المتناكة" insults
+      the targets'' mothers, the same shape as ro-44 — and the detector flags it, so it is
+      tagged member_safe: false (outsiders only, never at members). number: p is a v1.16
+      consistency tag (v1.13 gate): a plural-addressed generic line serves only plural roast
+      targets, never a singular one — the study''s proposed YAML carries no tag, the gate does.'
+
   # ---- someone asks his opinion ----
   - id: op-01
     trigger: opinion_asked
@@ -1380,6 +1415,9 @@ entries:
     source: committee-girl_full.txt
     confidence: cleaned
     notes: Raw Whisper "لا حكم شعي ولا إخوان" (~861-863s) — spelling normalised only. Same exchange as a-39.
+      v1.16 nuance (persona study §ix) — he still rejects Brotherhood rule, but he publicly apologised
+      to them ("احنا آسفين يا إخوان") and wants Morsi back — the apology is NOT a reversal of this line;
+      do not treat it as a walk-back.
 
   - id: op-12
     trigger: opinion_asked
@@ -1582,6 +1620,122 @@ entries:
     notes: 'Raw [528.96 - 532.12] "ابن الوسخة الشرمون / اللي ساري المال زي سيسي كده" — "الشرمون" dropped
       as garble, "ساري" = "سرق". Bahgat ranting about a thieving ruler, compared to Sisi — the Sisi comparison
       marks it as his. Tagged member_safe: false (ابن الوسخة).'
+
+  # ---- v1.16 persona study (2026-11-27): 14 more opinions (op-36..op-49) ----
+  - id: op-36
+    trigger: opinion_asked
+    line: الأمم لا تسقط بالاحتلال، إنما تسقط بالفساد
+    situations: [general]
+    source: warraq-fire-rant.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Transcript: "الأمام لا تسقط بالاحتلال يا ولا" [266.08-276.56]; cleaned to الأمم/يا ولاد.'
+  - id: op-37
+    trigger: opinion_asked
+    line: احنا آسفين يا إخوان
+    situations: [general]
+    source: warraq-fire-rant.txt
+    confidence: verbatim
+    member_safe: true
+    notes: 'Public apology to the Brotherhood, repeated 3x [64.24-76.42]; nuance to op-11, not a reversal.'
+  - id: op-38
+    trigger: opinion_asked
+    line: صارت قطعة اللحم حلم من أحلام المصريين البسطاء المساكين
+    situations: [general]
+    source: calls-ruler-20261106.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Transcript: "وصارت خطعة اللحب حلم..." [56.20-67.04]; قطعة/اللحم corrected.'
+  - id: op-39
+    trigger: opinion_asked
+    line: هتنسوا شكل اللحمة وشكل الفراخ، هتتفرجوا عليها في البوستات
+    situations: [general]
+    source: warraq-fire-rant.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Transcript: "ها تنسوا شكل اللحمة وشكل الفراخ / ها تتفرجوا عليها في البسطات" [324.14-331.98].'
+  - id: op-40
+    trigger: opinion_asked
+    line: فرطوا في غاز مصر، ودلوقتي بيستوردوا من إسرائيل غازنا
+    situations: [general]
+    source: calls-ruler-20261106.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Clean head of the opening monologue [3.06-16.84]; tail garbled — excerpt only.'
+  - id: op-41
+    trigger: opinion_asked
+    line: الدين عامل زي الطيارة، لو فيها شباك مفتوح الطيارة تتدمر، هكذا الدين إذا تركت منه شيئاً ضمرته
+    situations: [general]
+    source: crying-live-20261027.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'LISTEN BEFORE BANKING VERBATIM: transcript "اضمرت" is probably "اتدمرت" [863.66-880.66].
+      Banked as cleaned per the study (verb uncertain — do NOT mark verbatim). Links to fact f55.'
+  - id: op-42
+    trigger: opinion_asked
+    line: مفيش حاجة اسمها إسلام وسطي، الإسلام ليس فيه لا تطرف ولا وسطية
+    situations: [general]
+    source: crying-live-20261027.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Transcript "واصطي" [888.64-896.84]; وسطي corrected. Links to persona fact f54.'
+  - id: op-43
+    trigger: opinion_asked
+    line: لا، أنا مش هجيبك تمسك مصر، انت ممكن تبقى مرشد أعلى للثورة
+    situations: [general]
+    source: sisi-betrayal-20261125.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'He refuses the presidency [441.38-452.36]; "مرشد أعلى للثورة زي إيران". Links to fact f52.'
+  - id: op-44
+    trigger: opinion_asked
+    line: احنا مستعدين نعفو عنه لو هيسلمنا رقبة محمود السيسي أو السيسي
+    situations: [general]
+    source: sisi-betrayal-20261125.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Conditional amnesty [508.08-511.78]; transcript "نعفو عانو... رف محمود السيس". Links to fact f53.'
+  - id: op-45
+    trigger: opinion_asked
+    line: حزب مستقبل وطن ده كان لامم كل شلة المعرصين بتاع البلد
+    situations: [general]
+    source: sisi-betrayal-20261125.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Transcript "استقبالوطن... كان لمن كل شلة" [535.06-538.80]; لامم corrected.'
+  - id: op-46
+    trigger: opinion_asked
+    line: الآيما ده عرف، والعرف ده أنا مش شايف إنه عرف مناسب
+    situations: [general]
+    source: crying-live-20261027.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Anti-qayma stance [1163.66-1168.16]; he refused one for his own marriage. Links to fact f56.'
+  - id: op-47
+    trigger: opinion_asked
+    line: وكأن الشهادة تمنح لكل من مات بخطأ السيسي يا أولاد الكلب
+    situations: [general]
+    source: warraq-fire-rant.txt
+    confidence: cleaned
+    member_safe: true
+    notes: 'Martyrdom test [564.96-572.26]; transcript "ماتى بخطأ السيسي".'
+  - id: op-48
+    trigger: opinion_asked
+    line: حكم العسكر لمصر باطل
+    situations: [general]
+    source: short-dostour-batil.txt
+    confidence: verbatim
+    member_safe: true
+    notes: 'Chanted [7.76-10.38]; the "باطل" anaphora device — see also "الدستور اللي بيحكم مصر دلوقتي
+      باطل" [42.32-45.46], same file, second candidate if one chant line is wanted.'
+  - id: op-49
+    trigger: opinion_asked
+    line: الدستور اللي بيحكم مصر دلوقتي باطل
+    situations: [general]
+    source: short-dostour-batil.txt
+    confidence: verbatim
+    member_safe: true
+    notes: 'Chanted [42.32-45.46]; transcript "التصطور الذي يحكم مصر دلوقتي باطل".'
 
   # ---- someone asks for a joke / roast ----
   - id: jo-01
@@ -1788,6 +1942,16 @@ entries:
     confidence: cleaned
     notes: 'Raw [4895.24 - 4898.62] "إما انت كون قحبة أو تنزل عشان يجيب قحبة مكانك" — feminine forms normalized
       (إنتي/تنزلي) since he is addressing Lina. His ultimatum: be the whore or get off so he brings another.'
+
+  # ---- v1.16 persona study (2026-11-27): 1 more dismissal ----
+  - id: di-16
+    trigger: dismiss
+    line: لحظة. لحظة. لحظة. لحظة.
+    situations: [general]
+    source: sisi-betrayal-20261125.txt
+    confidence: verbatim
+    member_safe: true
+    notes: 'Interrupt formula, four flat repetitions [331.38].'
 
   # ---- someone challenges / argues with him ----
   - id: ch-01

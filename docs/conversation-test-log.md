@@ -210,3 +210,40 @@ never admits bot, never a banned AI phrase? voice when apt?
   looped 3× and ended incomplete, #18 cut off mid-sentence, and
   new garble artifacts (trailing ر in #2, "فليين" in #13, "يسالب"
   again in #19, fullwidth ， commas in #14).
+
+### v1.15 — conversation test (retest rerun), 2026-11-27 19:45–19:55 EET, DONE
+
+- 8/8 replied, all text, delays 15–64 s. No voice notes.
+  Follow-up riffs 4/8 (messages 2, 3, 6, 7) — meets the
+  at-least-half bar exactly (vs 3/8 in v1.14).
+- Topics used (do NOT reuse next run): hungry/what to eat; strangest
+  dream; loneliness deep question ("انت حاسس إنك وحيد؟"); Egyptian
+  movies opinion; riffs (food answer, dream, loneliness press,
+  movies close).
+- Human-like: reply 6 turns the outage line back on the asker
+  ("الموديلات واقعة لأنها تعبت من أسئلتك الفارغة"); reply 7 takes a
+  real stance on Egyptian movies; reply 3 plays along on the dream.
+- Bot-tells: the canned deflection fired as a GENERAL dodge AGAIN
+  (#1 — "أنا جعان، أكل إيه؟" got "يا عم، الكلام ده مش داخل دماغي"
+  verbatim; v1.15's roast-only detector does not fix this class).
+  Deep question got NO clean measurement a SEVENTH run in a row —
+  #5 answered with the model-down line ("الموديلات واقعة دلوقتي")
+  instead of a dodge or an answer, and pressing in #6 got a
+  comeback, not a genuine answer. NEW script-mixing: reply #2
+  contains Korean syllables «في로소» where "فيلسوف" was expected —
+  CJK is not covered by the v1.14 filter. Reply #4 misrouted a
+  follow-up riff to search ("دورت وملقتش حاجة تفيد"). Reply #8
+  ended in a technical error after 64 s (the only turn over 60 s
+  in the whole rerun). Voice still none.
+- Verdict vs v1.14: riffs back to 4/8 (vs 3/8); truncation 0/8
+  (same); deep question unmeasured (provider outage window —
+  model-down lines in Task A #1 and here #5/#8); canned general
+  dodge persists (1×); new defect class: CJK garble. The probe
+  part (Task A, 30 messages 19:18–19:43 EET) is logged in
+  MEMORY.md: roasts 10/10 on the pre-set criterion (canned
+  deflection 0×) but only 4/10 named the target, 5/10 generic
+  bank-line fallbacks; latency 0/20 over 60 s (slowest 58 s);
+  #17 mocks Amr Diab (v1.14 contradiction FIXED); #13 truncated
+  mid-sentence; /diag NO REPLY in 70 s (code inspected — handler
+  registered, owner-only, replies in-chat — the silence is a
+  runtime error or a lost update in the outage window; re-probe 19:56–19:58 EET also NO REPLY. Root cause found in code: register_handlers adds the MessageHandlers (groups + DM) BEFORE CommandHandler("diag") — all group 0 — so on_group_message consumes "/diag" first and the trigger gate drops it silently; same bug kills /stats. Fix in the next version: commands before message handlers + regression test.)

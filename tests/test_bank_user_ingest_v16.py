@@ -171,7 +171,7 @@ def test_round3_lines_honest_attribution_and_tags():
 
 def test_round3_insulted_pool_counts():
     bank = load_bank()
-    assert len(bank["insulted"]) == 44
+    assert len(bank["insulted"]) == 45  # v1.16: in-46 added
     user_insulted = [e for e in bank["insulted"]
                      if e.get("confidence") == "user"]
     assert len(user_insulted) == 30  # 17 round 1 + 8 round 2 + 5 round 3
@@ -180,13 +180,13 @@ def test_round3_insulted_pool_counts():
 
 def test_round3_roast_reachable_and_targeted():
     bank = load_bank()
-    assert len(bank["roast"]) == 45
+    assert len(bank["roast"]) == 46  # v1.16: ro-47 added
     user_roast = [e for e in bank["roast"]
                   if e.get("confidence") == "user"]
     assert len(user_roast) == 10  # 4 round 1 + 1 round 2 + 5 round 3
     generic = {e["line"] for e in bank["roast"]
                if e.get("target") is None}
-    assert len(generic) == 19  # v1.13: ro-39 targets كريستيانو
+    assert len(generic) == 20  # v1.16: ro-47 added  # v1.13: ro-39 targets كريستيانو
     # A roast of anyone else never serves the Mido line.
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = {
@@ -236,7 +236,7 @@ def test_round3_no_duplicates():
     raw = _raw()
     lines = [e["line"] for e in raw]
     assert len(lines) == len(set(lines))
-    assert len(raw) == 224
+    assert len(raw) == 241  # v1.16: +17 study lines
     user_lines = [e["line"] for e in raw
                   if e.get("confidence") == "user"]
     assert len(user_lines) == len(set(user_lines)) == 40

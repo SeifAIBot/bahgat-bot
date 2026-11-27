@@ -41,7 +41,7 @@ SUBMITTED = [
     "حاسس ان زوبي نار",
     "يا سالب يا مبعر احترم رجولتك حتي",
     "يخي بزعل علي الشباب",
-    "بص هتجيب زبي و تغرقه كاتشب و مايونيز و تمصمص يسالب",
+    "بص هتجيب زبي و تغرقه كاتشب و مايونيز و تمصمص يا سالب",
     "كنت بموت في عنيك كنت بحبك نيك",
     "قووم يا مصري مش هنتحايل عليك",
     "يا كس الكلبه هوهو بعيد",
@@ -137,7 +137,7 @@ def test_user_lines_honest_attribution_and_ids():
 
 def test_user_insulted_lines_are_member_safe():
     bank = load_bank()
-    assert len(bank["insulted"]) == 44
+    assert len(bank["insulted"]) == 45  # v1.16: in-46 added
     user_insulted = [e for e in bank["insulted"]
                      if e.get("confidence") == "user"]
     assert len(user_insulted) == 30
@@ -146,7 +146,7 @@ def test_user_insulted_lines_are_member_safe():
 
 def test_user_roast_lines_generic_and_tagged():
     bank = load_bank()
-    assert len(bank["roast"]) == 45
+    assert len(bank["roast"]) == 46  # v1.16: ro-47 added
     user_roast = [e for e in bank["roast"]
                   if e.get("confidence") == "user"]
     assert len(user_roast) == 10
@@ -201,7 +201,7 @@ def test_family_user_line_never_served_to_members(monkeypatch):
 def test_user_roast_lines_reachable_for_any_target():
     generic = {e["line"] for e in load_bank()["roast"]
                if e.get("target") is None}
-    assert len(generic) == 19  # v1.13: ro-39 targets كريستيانو
+    assert len(generic) == 20  # v1.16: ro-47 added  # v1.13: ro-39 targets كريستيانو
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = {
             match_reply_bank(text, chat_id=CHAT_ID, target_is_member=False)

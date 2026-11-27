@@ -208,8 +208,8 @@ def test_weave_about_target(reply, target, requester, expected):
 # --- (c) the prompt block ---------------------------------------------------
 
 
-def test_prompt_version_is_7_1():
-    assert PROMPT_VERSION == "7.1"  # v1.15: roast context + softened refusal
+def test_prompt_version_is_7_2():
+    assert PROMPT_VERSION == "7.2"  # v1.16: persona-fidelity behaviour lines
 
 
 def test_bank_ingredient_block_roast_names_target_and_requester():
