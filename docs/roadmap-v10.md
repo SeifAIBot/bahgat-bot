@@ -34,9 +34,17 @@ unverified version ships.
 - **v1.8 — YouTube 🎬/🎵 end-to-end live:** video + audio taps deliver real
   files on Cloady; cookies path; 50 MB limit handled. Acceptance: tap both
   buttons live, files arrive.
-- **v1.9 — Roast coverage:** "cowardly" situation gets lines; mine the
+- **v1.9 — Roast coverage (PENDING, numbering shifted):** "cowardly" situation gets lines; mine the
   Telegram clip library for new real Bahgat lines (transcript confidence),
   situation-tagged, member-safe. Acceptance: bank grows, no regressions.
+  (Was the v1.9 slot in the original queue; the slot was taken by the
+  edge-tts voice fix, which shipped as v1.9 instead. Roast coverage is
+  still next in the feature queue after v1.10.)
+- **v1.10 — WARP in-container for YouTube downloads (IN PROGRESS):** wgcf + wireproxy baked into the
+  image, profile persisted under /app/data/warp/, proxy on the download
+  path only, WARP_ENABLED kill switch, enrolment cap 3. Acceptance:
+  El Kholasa video + audio taps deliver real files live; voice ×3
+  re-checked (new egress IP may also fix the v1.9 voice intermittency).
 - **v2.0 — TikTok fetch:** "هات تيك توك ..." / TikTok link → video
   download + choice. Acceptance: TikTok URL → file live.
 - **v2.1 — Search quality:** sourced answers, freshness, follow-up
@@ -58,5 +66,7 @@ unverified version ships.
 
 ## Status
 
-- v1.6 live (82d3d25). Baseline live test of v1.6 running 2026-11-27
-  03:36 EET. v1.7 fix in progress.
+- v1.9 live (0d918a5, 2026-11-27 04:38 EET). Live retest 04:59–05:05 EET:
+  voice 1/3 (edge-tts 7.3.1 works but intermittent — likely Edge
+  rate-limiting the datacenter IP), failure lines pass (natural Egyptian),
+  identity passes. v1.10 WARP in progress.

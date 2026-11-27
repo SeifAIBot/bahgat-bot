@@ -9,12 +9,14 @@ root. `from telegram import ...` below always means the installed library.
 """
 import logging
 import os
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from core.config import load_settings
 from tg.app import build_application
 from tg.health import start_health_server, stop_health_server
+from tools import warp as _warp
 
 logger = logging.getLogger("bahgat")
 
@@ -76,6 +78,16 @@ def _configure_logging(settings, log_path=None) -> None:
 def main():
     settings = load_settings()
     _configure_logging(settings)
+    # v1.10: WARP egress for YouTube downloads (wgcf + wireproxy in the
+    # container). Started in a daemon thread so a slow tunnel — or a
+    # host that blocks UDP entirely — never delays polling: the bot
+    # answers chat/search direct from boot, and downloads switch to the
+    # proxy the moment it is up (tools/warp.ensure_warp never raises).
+    try:
+        threading.Thread(target=_warp.ensure_warp, name="warp",
+                         daemon=True).start()
+    except Exception as e:  # noqa: BLE001 — boot must not die over WARP
+        logger.warning("warp thread could not start (%s); downloads stay direct", e)
     app = build_application(settings)
     logger.info("Bahgat starting — polling")
     # Health endpoint for PaaS health checks (Northflank /healthz). Daemon
@@ -99,6 +111,7 @@ def main():
         )
     finally:
         stop_health_server(health_server)
+        _warp.stop_warp()
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ import json, re, subprocess, os, time, uuid, logging
 from pathlib import Path
 from urllib.parse import urlparse
 
+from tools import warp as _warp
+
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 50 * 1024 * 1024
@@ -179,6 +181,49 @@ def _player_client_cli(client: str, skip_configs: bool) -> list[str]:
     if skip_configs:
         tokens += ["--extractor-args", "youtube:player_skip=configs"]
     return tokens
+
+
+# v1.10 (WARP): the yt-dlp download path — and ONLY it — goes through the
+# Cloudflare WARP SOCKS5 proxy when it is up (tools/warp.py). Search
+# (search_query) and resolve stay direct: they work from Cloady already,
+# and routing them through the tunnel would burn tunnel bandwidth for
+# nothing. A download attempt that fails with an error naming the PROXY
+# itself (not YouTube) trips a short circuit breaker so the remaining
+# attempts in the chain — and the next downloads for a few minutes — go
+# direct instead of burning every attempt against a dead tunnel. A
+# YouTube bot-check through the proxy does NOT trip it: the chain must
+# keep retrying other clients through WARP, that is the whole point.
+_PROXY_BREAKER_SECONDS = 300
+_PROXY_DOWN_UNTIL = 0.0
+_PROXY_ERROR_MARKERS = (
+    "proxy", "socks", "connection refused", "errno 111", "errno 61",
+    "tunnel connection failed", "unable to connect",
+)
+
+
+def _proxy_args() -> list[str]:
+    """--proxy flags for one download attempt: the WARP SOCKS5 URL when
+    the proxy is up and the breaker is not tripped, else []. Evaluated
+    per attempt, so a breaker tripped mid-chain takes effect on the
+    very next attempt. The URL itself is never logged."""
+    if time.monotonic() < _PROXY_DOWN_UNTIL:
+        return []
+    url = _warp.proxy_url()
+    if url is None or not _warp.proxy_available():
+        return []
+    return ["--proxy", url]
+
+
+def _maybe_trip_proxy_breaker(detail: str) -> None:
+    """Trip the breaker when a failed attempt's error names the proxy
+    itself. Only called for attempts that actually went through the
+    proxy (the caller knows)."""
+    global _PROXY_DOWN_UNTIL
+    s = (detail or "").lower()
+    if any(m in s for m in _PROXY_ERROR_MARKERS):
+        _PROXY_DOWN_UNTIL = time.monotonic() + _PROXY_BREAKER_SECONDS
+        logger.warning("warp proxy looks dead (%s); downloads go direct for %ss",
+                       detail[:120], _PROXY_BREAKER_SECONDS)
 
 
 def _cookies_args() -> list[str]:
@@ -544,23 +589,33 @@ def download(url_or_query: str, audio_only: bool, out_dir: str | None = None) ->
             # tickets, not a burst at the same second.
             time.sleep(_RETRY_PASS_SLEEP_SECONDS)
         attempt_fmt = fmt_override or fmt
-        cmd = ["yt-dlp", "--no-playlist", "--max-filesize", "50M",
+        # v1.10: --force-ipv4 (research §3g: YouTube scores a whole
+        # IPv6 /64 as one unit, so a shared /64 is MORE exposed than a
+        # single IPv4; the standard yt-dlp recipe forces IPv4) and the
+        # WARP proxy, evaluated fresh per attempt so the circuit
+        # breaker can take effect mid-chain.
+        proxy_args = _proxy_args()
+        cmd = ["yt-dlp", "--no-playlist", "--max-filesize", "50M", "--force-ipv4",
                *_player_client_cli(client, skip)]
         if client == "web":
             cmd += _js_runtime_args()
         if use_cookies:
             cmd += cookies
+        cmd += proxy_args
         cmd += ["-f", attempt_fmt, "-o", out, "--print", "after_move:filepath"]
         if audio_only:
             cmd += ["--extract-audio", "--audio-format", "mp3"]
         cmd += ["--", url]
         try:
             res = _run_yt_dlp(cmd, timeout=180)
-            logger.info("youtube download succeeded on attempt %s", label)
+            logger.info("youtube download succeeded on attempt %s (egress=%s)",
+                        label, "warp" if proxy_args else "direct")
             break
         except RuntimeError as e:
             last_detail = str(e).removeprefix("yt-dlp failed: ").strip()
             logger.warning("youtube download attempt %s failed: %s", label, e)
+            if proxy_args:
+                _maybe_trip_proxy_breaker(last_detail)
     if res is None:
         raise RuntimeError(
             f"yt-dlp failed: all {len(attempts)} download attempts failed "
