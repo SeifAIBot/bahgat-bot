@@ -16,6 +16,7 @@
 """
 import re
 
+from brain.persona_facts import filter_persona_polarity
 try:
     from core.rules import (
         FAMILY_WORDS,
@@ -133,7 +134,59 @@ _INTERNAL_BLOCK_RES = [
 ]
 
 
-def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[bool, str]:
+# v1.14: script-mixing filter. The LLM sometimes mixes scripts into an
+# otherwise Arabic reply — live v1.13: Latin "مessi" / "ya" / "متnak",
+# Hebrew "גדול", Cyrillic "б" inside "عبيط". Bahgat writes Egyptian
+# Arabic only, so Hebrew / Cyrillic / Greek characters are never
+# legitimate — with one correction to the naive "strip them" idea: the
+# live Cyrillic artifact was a SUBSTITUTE, not an extra letter
+# ("عбиط" is ع + Cyrillic б + ي + ط, the б standing in for the Arabic
+# ب), so stripping it alone leaves the wrong word "عيط". The
+# confusable б is therefore mapped to ب first, and only the remaining
+# foreign-script characters are stripped. A token mixing Arabic and
+# Latin letters in one word is never legitimate (the whole token
+# goes), and a standalone Latin token is kept only when allowlisted
+# (PES / eFootball / Android / iPhone / Mac / YouTube). Fast path: a
+# reply with no foreign-script or Latin letter is returned untouched.
+_HEBREW_RE = re.compile(r"[\u0590-\u05FF]")
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+_GREEK_RE = re.compile(r"[\u0370-\u03FF]")
+_FOREIGN_SCRIPT_RE = re.compile(r"[\u0590-\u05FF\u0400-\u04FF\u0370-\u03FFA-Za-z]")
+# Cyrillic lookalike standing in for an Arabic letter (live v1.13).
+_CONFUSABLES = {"\u0431": "ب"}  # Cyrillic small letter be → Arabic beh
+_LATIN_ALLOWLIST = frozenset(
+    {"pes", "efootball", "android", "iphone", "mac", "youtube"})
+
+
+def _strip_script_mixing(text: str) -> str:
+    if not _FOREIGN_SCRIPT_RE.search(text):
+        return text
+    for conf, repl in _CONFUSABLES.items():
+        text = text.replace(conf, repl)
+    text = _HEBREW_RE.sub("", text)
+    text = _CYRILLIC_RE.sub("", text)
+    text = _GREEK_RE.sub("", text)
+    out = []
+    for tok in text.split(" "):
+        if not tok:
+            continue
+        # Arabic LETTERS only (U+0621–U+064A) — the wider Arabic block
+        # also holds punctuation (، ؛ ؟), and a Latin token next to an
+        # Arabic comma ("PES،") is not a mixed token.
+        has_ar = any("\u0621" <= c <= "\u064a" for c in tok)
+        has_lat = any(c.isascii() and c.isalpha() for c in tok)
+        if has_ar and has_lat:
+            continue  # mixed token ("مessi", "متnak"): drop it whole
+        if has_lat and not has_ar:
+            core = tok.strip(".,!؟،؛:;\"'()[]")
+            if core.lower() not in _LATIN_ALLOWLIST:
+                continue
+        out.append(tok)
+    return " ".join(out)
+
+
+def check_reply(text: str, insult_level: str = "full", owner_id=None,
+                *, persona_selection=None) -> tuple[bool, str]:
     """Returns (ok, cleaned_text).
 
     - personal_only + family words: silently drop the offending sentences;
@@ -153,6 +206,14 @@ def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[b
       user-facing reply. Stripping happens FIRST, before the other
       checks, so a reply that was only a leaked block falls through to
       the handler's empty-reply fallback.
+    - v1.14: script-mixing is stripped (see _strip_script_mixing), and
+      when the handler passes persona_selection (a select_facts() dict
+      for this turn), the deterministic polarity post-filter drops
+      clauses from the unselected polarity and falls back to a canned
+      template from the selected rows — never to the full persona block.
+      The leak check runs BEFORE the script-mixing strip: the strip
+      drops standalone Latin tokens, which is exactly what a leaked
+      key / "SYSTEM_BASE" mention is.
     """
     cleaned = text or ""
     ok = True
@@ -160,6 +221,15 @@ def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[b
     for _block_re in _INTERNAL_BLOCK_RES:
         cleaned = _block_re.sub("", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    # Leak check runs BEFORE the script-mixing strip (v1.14): the
+    # strip drops standalone Latin tokens, which is exactly what a
+    # leaked key / "SYSTEM_BASE" mention is — checking after the
+    # strip would let the leak through as a clean reply.
+    if _leaks(cleaned, owner_id):
+        return False, _DEFLECTION
+    cleaned = _strip_script_mixing(cleaned)
+    if persona_selection is not None:
+        cleaned = filter_persona_polarity(cleaned, persona_selection)
     if insult_level == "personal_only" and contains_family(cleaned):
         cleaned = _strip_family_sentences(cleaned)
         if not cleaned:
@@ -172,8 +242,6 @@ def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[b
     if contains_self_bot_admission(cleaned):
         cleaned = _SELF_BOT_DENIAL
         ok = False
-    if _leaks(cleaned, owner_id):
-        return False, _DEFLECTION
     return ok, cleaned
 
 

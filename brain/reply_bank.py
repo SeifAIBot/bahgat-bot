@@ -367,8 +367,10 @@ def _pick(
     when the tier is empty or entirely inside the window; (b) the
     gender/number gates (_is_gated) exclude generic feminine/plural
     lines unless the request is marked so. Bare singular roast pool:
-    20 -> 16 lines (19 generic minus ro-12/ro-40 plural and ro-23
-    feminine). NOTE: an earlier draft of this change also gated
+    19 generic -> 15 after the gender/number gates (minus
+    ro-12/ro-40/ro-44 plural and ro-23 feminine — the v1.13 docstring
+    said 16, it missed ro-44), -> 14 in v1.14 with ro-15 excluded as
+    a dare. NOTE: an earlier draft of this change also gated
     perv-only lines behind a perv-marked request — REMOVED before
     shipping. The gender/number gates already fix the observed v1.11
     defects (ro-23 for صلاح, plural lines for singular targets), and
@@ -379,6 +381,12 @@ def _pick(
     entries = load_bank().get(category) or []
     if member_safe_only:
         entries = [e for e in entries if e.get("member_safe", True) is not False]
+    # v1.14 (C): a dare is not an insult of the target — ro-15 ("روح
+    # البنك كده وقول له عاوز عشر تلاف دولار") served as a "roast" for
+    # عمرو in the v1.13 live retest. Lines tagged `dare: true` never
+    # serve as a roast (roast only — the tag is ignored elsewhere).
+    if category == "roast":
+        entries = [e for e in entries if not e.get("dare")]
     if target is not None:
         entries = [e for e in entries if _target_matches(e.get("target"), target)]
     # v1.13: NO perv gate. An earlier draft gated perv-only lines

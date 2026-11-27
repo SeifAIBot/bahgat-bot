@@ -947,6 +947,7 @@ entries:
     trigger: roast
     line: روح البنك كده وقول له عاوز عشر تلاف دولار
     situations: [arrogant]
+    dare: true
     source: lagan_full.txt
     confidence: cleaned
     notes: Raw "أنا عوزك توصل كده للبنك وتقول له عوز عشر تلاف دولار" — his dare to a caller who claimed

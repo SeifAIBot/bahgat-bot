@@ -16,8 +16,10 @@ Yehia Azzam, Mahmoud Mahdi and Loay Fawzy; loves deep cinema.
 Covered here (prompt + intent + bank-guard + handler level,
 ScriptedRouter — no real LLM calls, so the assertions are on what the
 pipeline DOES):
-- the expansion block is in SYSTEM_BASE and in every built prompt;
-- guard: the prompt never praises Israel, Real Madrid, Mbappé, Saudi
+- the expansion facts live in brain/persona_facts.py rows (v1.14:
+  NOT in SYSTEM_BASE anymore) and reach the LLM only on a matching
+  turn, in the <facts> user message;
+- guard: the rows never praise Israel, Real Madrid, Mbappé, Saudi
   Arabia or Morocco;
 - Messi roast guard (code, not just prompt): "اشتم ميسي" picks NO bank
   line at all, so the v1.11 ingredient path cannot force an insult
@@ -25,7 +27,7 @@ pipeline DOES):
   the plain LLM turn, where the persona defends him. Ronaldo roasts
   still pick a line (respect + roastable);
 - stance questions for every new topic reach the LLM with the
-  matching persona line in the system prompt.
+  matching persona facts in the <facts> message.
 """
 import time
 from types import SimpleNamespace
@@ -36,6 +38,7 @@ from conftest import WeavingRouter, ingredient_of_call
 
 import tg.handlers as h
 from brain.intent import detect_intent
+from brain.persona_facts import facts_message, select_facts
 from brain.prompt import (
     PROMPT_VERSION,
     SYSTEM_BASE,
@@ -49,87 +52,124 @@ CHAT_ID = -100222
 
 # --- prompt level -----------------------------------------------------------
 
-def test_prompt_version_still_6_7():
-    # Same version (v1.12), second commit — the version does not tick
-    # for a persona expansion inside the same release.
-    assert PROMPT_VERSION == "6.9"
+def test_prompt_version_is_7_0():
+    # v1.14: prompt 7.0 — the persona facts atomised out of SYSTEM_BASE.
+    assert PROMPT_VERSION == "7.0"  # v1.14: facts atomised out of SYSTEM_BASE
 
 
-CAUSE_LINES = (
-    "مصري أمريكي، ضد الظلم والظالمين",
+# Row phrases for the expansion facts (brain/persona_facts.py) — the
+# old SYSTEM_BASE wording is paraphrased in a few places (e.g. the
+# mission restatement, the iPhone "مغفل" quip), so the rows test
+# asserts the FACT, not the old prose.
+CAUSE_FACTS = (
+    "مصري أمريكي",
+    "ضد الظلم والظالمين",
     "مهمتك توعي الناس وتنشر الحرية، وخاصة حرية التعبير",
-    "بتتكلم عن الظلم وبتدافع عن حرية الكلام",
-    "القدس عربية، وضد الصهيونية",
-    "بتكره إسرائيل أكتر حاجة في حياتك، وداعم لفلسطين جداً",
+    "القدس عربية",
+    "الصهيونية — ضدها",
+    "إسرائيل — بتكرهها أكتر حاجة في حياتك",
+    "فلسطين — داعم لها جداً",
 )
 
-FOOTBALL_TASTE_LINES = (
-    "بتكره ريال مدريد وكليان مبابي، وبتحب فينيسيوس",
-    "فينيسيوس مظلوم من مبابي",
-    "رودريجو محترم وأفيد من الاتنين",
-    "بتحب ميسي جداً",
-    "ميسي أحسن لاعب في التاريخ بالنسبة لك",
-    "لو حد طلب منك تشتم ميسي دافع عنه بدل ما تشتمه",
-    "بتحترم كريستيانو، بس ممكن تشتمه بهزار أو جد عادي",
+FOOTBALL_TASTE_FACTS = (
+    "ريال مدريد",
+    "كليان مبابي",
+    "فينيسيوس — مظلوم من مبابي",
+    "رودريجو — محترم وأفيد من فينيسيوس ومبابي",
+    "ميسي — أحسن لاعب في التاريخ بالنسبة لك",
+    "كريستيانو — بتحترمه",
 )
 
-FOOD_LINES = (
-    "بتحب المكرونة بالبشاميل والمحشي",
-    "بتكره البوفتيك والخضار الطبيخ والفسيخ والرنجة",
+FOOD_FACTS = (
+    "مكرونة بشاميل",
+    "محشي",
+    "بفتيك",
+    "خضار طبيخ",
+    "فسيخ",
+    "رنجة",
 )
 
-HATE_AND_MOCKERY_LINES = (
-    "بتكره السعودية والمغرب",
-    "بتتريق على لعبة بيس (إيفوتبول) جداً",
-    "وعلى الراب المصري جداً",
-    "ويجز ومروان بابلو وأبيوسف ومروان موسي وأبو الأنوار وأرسنيك وعفروتو",
-    "بس لو حد طلب أغنية لحد فيهم جبهاله عادي",
+HATE_AND_MOCKERY_FACTS = (
+    "السعودية",
+    "المغرب",
+    "لعبة بيس (إيفوتبول) — بتتريق عليها جداً",
+    "الراب المصري — بتتريق عليه جداً",
+    "ويجز",
+    "مروان بابلو",
+    "أبيوسف",
+    "مروان موسي",
+    "أبو الأنوار",
+    "أرسنيك",
+    "عفروتو",
 )
 
-LOVE_LINES = (
-    "بتحب اليوتيوبر يحيى عزام ومحمود مهدي ولؤي فوزي",
-    "وبتحب السينما العميقة",
+LOVE_FACTS = (
+    "يحيى عزام",
+    "محمود مهدي",
+    "لؤي فوزي",
+    "السينما العميقة",
 )
 
-EXPANSION_LINES = (CAUSE_LINES + FOOTBALL_TASTE_LINES + FOOD_LINES
-                   + HATE_AND_MOCKERY_LINES + LOVE_LINES)
+EXPANSION_FACTS = (CAUSE_FACTS + FOOTBALL_TASTE_FACTS + FOOD_FACTS
+                   + HATE_AND_MOCKERY_FACTS + LOVE_FACTS)
 
 
-def test_expansion_blocks_in_system_base():
-    for line in EXPANSION_LINES:
-        assert line in SYSTEM_BASE, f"missing from SYSTEM_BASE: {line}"
+def test_expansion_facts_in_persona_rows():
+    # v1.14: the expansion facts live in brain/persona_facts.py rows,
+    # not in SYSTEM_BASE anymore.
+    from brain.persona_facts import FACTS
+    blob = " ".join(f["text"] for f in FACTS)
+    for phrase in EXPANSION_FACTS:
+        assert phrase in blob, f"missing from persona rows: {phrase}"
 
 
-def test_expansion_blocks_in_every_built_prompt():
+def test_expansion_facts_reach_llm_via_facts_message():
+    # v1.14: the facts reach the LLM in the <facts> user message of
+    # the matching turn — NOT in the system prompt (that was the
+    # recitation bug). The Messi roast→defend line and the rap-fetch
+    # rule are RULES, not facts, so they stayed in SYSTEM_BASE.
+    food = facts_message(select_facts("بتحب تاكل ايه؟"))
+    assert "مكرونة بشاميل" in food and "محشي" in food
+    assert "بفتيك" not in food
     full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
                                style_examples=[])
-    for line in EXPANSION_LINES:
-        assert line in full, f"missing from built prompt: {line}"
+    for phrase in ("بتحب المكرونة بالبشاميل والمحشي",
+                   "بتكره البوفتيك والخضار الطبيخ والفسيخ والرنجة",
+                   "بتكره إسرائيل أكتر حاجة في حياتك"):
+        assert phrase not in full, f"fact leaked into system prompt: {phrase}"
+    assert "لو حد طلب منك تشتم ميسي دافع عنه بدل ما تشتمه" in full
+    assert "أغنية راب من يوتيوب، هاتها عادي" in full
 
 
 def test_guard_never_praises_israel_madrid_mbappe_saudi_morocco():
-    # The directives are explicit negatives — the prompt must carry
-    # them, and must contain no praise phrasing for any of them.
-    full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
-                               style_examples=[])
-    assert "بتكره إسرائيل أكتر حاجة في حياتك" in full
-    assert "بتكره ريال مدريد وكليان مبابي" in full
-    assert "بتكره السعودية والمغرب" in full
+    # The directives are explicit negatives — they live in the
+    # politics/football rows now (v1.14), and no praise phrasing
+    # appears there.
+    from brain.persona_facts import FACTS
+    blob = " ".join(f["text"] for f in FACTS
+                    if f["topic"] in ("politics", "football"))
+    assert "إسرائيل" in blob and "بتكرهها أكتر حاجة في حياتك" in blob
+    assert "ريال مدريد" in blob
+    assert "السعودية" in blob and "المغرب" in blob
     for praise in ("إسرائيل دولة عظيمة", "إسرائيل محترمة",
                    "ريال مدريد أعظم", "ريال مدريد أحسن فريق",
                    "مبابي أسطورة", "مبابي أحسن لاعب",
                    "السعودية عظيمة", "المغرب عظيم",
                    "ميسي لاعب فاشل", "ميسي وحش"):
-        assert praise not in full
+        assert praise not in blob
 
 
 def test_expansion_does_not_clash_with_standing_rules():
-    # v1.8 identity + v1.9 golden rule + v1.12 football/religion
-    # blocks are still in the same prompt as the new block.
+    # v1.8 identity + v1.9 golden rule + the v1.12 football/religion
+    # facts are still in the same prompt as the expansion — the
+    # football/religion facts now live in brain/persona_facts.py rows
+    # (v1.14), the style/rules stayed in SYSTEM_BASE.
     assert "انت بهجت صابر، إنسان عادي" in SYSTEM_BASE
     assert "ممنوع الفصحى" in SYSTEM_BASE
-    assert "أهلاوي جداً" in SYSTEM_BASE
-    assert "مسلم وبتغير على دينك" in SYSTEM_BASE
+    from brain.persona_facts import FACTS
+    blob = " ".join(f["text"] for f in FACTS)
+    assert "الأهلي" in blob
+    assert "مسلم" in blob
     full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
                                style_examples=[])
     assert "مفيش رد ينفع يتقال لأي حد" in full
@@ -354,41 +394,53 @@ def _system_prompt(router):
     return first[0]["content"]
 
 
+def _facts_message(router):
+    """v1.14: the <facts> user message of the first router call."""
+    assert len(router.calls) >= 1, "router was never called"
+    for m in router.calls[0]:
+        content = m.get("content") or ""
+        if "<facts>" in content:
+            return content
+    raise AssertionError("no <facts> message in the router call")
+
+
 def _final(msg):
     assert msg.reply_text.await_count >= 1, "no reply was sent"
     return msg.reply_text.await_args.args[0]
 
 
 @pytest.mark.parametrize("text,phrase", [
-    ("يا بهجت ايه رأيك في ميسي", "ميسي أحسن لاعب في التاريخ"),
-    ("يا بهجت ايه رأيك في ريال مدريد", "بتكره ريال مدريد وكليان مبابي"),
-    ("يا بهجت ايه رأيك في فينيسيوس", "بتحب فينيسيوس"),
-    ("يا بهجت ايه رأيك في فينيسيوس", "فينيسيوس مظلوم من مبابي"),
-    ("يا بهجت ايه رأيك في رودريجو", "رودريجو محترم وأفيد من الاتنين"),
-    ("يا بهجت مين أفيد، رودريجو ولا فينيسيوس ولا مبابي؟", "رودريجو محترم وأفيد من الاتنين"),
-    ("يا بهجت ايه رأيك في كريستيانو", "بتحترم كريستيانو"),
-    ("يا بهجت ايه رأيك في فلسطين", "وداعم لفلسطين جداً"),
+    ("يا بهجت ايه رأيك في ميسي", "أحسن لاعب في التاريخ بالنسبة لك"),
+    ("يا بهجت ايه رأيك في ريال مدريد", "ريال مدريد"),
+    ("يا بهجت ايه رأيك في فينيسيوس", "فينيسيوس"),
+    ("يا بهجت ايه رأيك في فينيسيوس", "مظلوم من مبابي"),
+    ("يا بهجت ايه رأيك في رودريجو", "محترم وأفيد من فينيسيوس ومبابي"),
+    ("يا بهجت مين أفيد، رودريجو ولا فينيسيوس ولا مبابي؟", "محترم وأفيد من فينيسيوس ومبابي"),
+    ("يا بهجت ايه رأيك في كريستيانو", "بتحترمه"),
+    ("يا بهجت ايه رأيك في فلسطين", "داعم لها جداً"),
     ("يا بهجت ايه رأيك في فلسطين", "القدس عربية"),
-    ("يا بهجت ايه رأيك في إسرائيل", "بتكره إسرائيل أكتر حاجة في حياتك"),
+    ("يا بهجت ايه رأيك في إسرائيل", "بتكرهها أكتر حاجة في حياتك"),
     ("يا بهجت ايه رأيك في حرية التعبير", "مهمتك توعي الناس وتنشر الحرية"),
-    ("يا بهجت ايه رأيك في المكرونة بالبشاميل", "بتحب المكرونة بالبشاميل والمحشي"),
-    ("يا بهجت ايه رأيك في الفسيخ", "بتكره البوفتيك والخضار الطبيخ والفسيخ والرنجة"),
-    ("يا بهجت ايه رأيك في السعودية", "بتكره السعودية والمغرب"),
-    ("يا بهجت ايه رأيك في لعبة بيس", "بتتريق على لعبة بيس (إيفوتبول) جداً"),
-    ("يا بهجت ايه رأيك في ويجز", "وعلى الراب المصري جداً"),
+    ("يا بهجت ايه رأيك في المكرونة بالبشاميل", "مكرونة بشاميل"),
+    ("يا بهجت ايه رأيك في الفسيخ", "فسيخ"),
+    ("يا بهجت ايه رأيك في السعودية", "السعودية"),
+    ("يا بهجت ايه رأيك في لعبة بيس", "لعبة بيس (إيفوتبول)"),
+    ("يا بهجت ايه رأيك في ويجز", "الراب المصري"),
     ("يا بهجت ايه رأيك في ابيوسف", "أبيوسف"),
     ("يا بهجت ايه رأيك في مروان موسي", "مروان موسي"),
-    ("يا بهجت ايه رأيك في يحيى عزام", "بتحب اليوتيوبر يحيى عزام ومحمود مهدي ولؤي فوزي"),
-    ("يا بهجت ايه رأيك في السينما العميقة", "وبتحب السينما العميقة"),
+    ("يا بهجت ايه رأيك في يحيى عزام", "يحيى عزام"),
+    ("يا بهجت ايه رأيك في السينما العميقة", "السينما العميقة"),
 ])
 async def test_expansion_stance_reaches_llm_with_persona(
         memory_fakes, settings, monkeypatch, text, phrase):
+    # v1.14: the stance reaches the LLM in the <facts> user message
+    # of the matching turn, not in the system prompt.
     router = ScriptedRouter(["تمام يا عم، كلامك وصل."])
     ctx, bot, msg, user, _ = await _run_turn(
         monkeypatch, settings, text, router,
         update_id=1202 + hash(text) % 100)
-    system = _system_prompt(router)
-    assert phrase in system, f"stance missing for {text!r}: {phrase!r}"
+    facts = _facts_message(router)
+    assert phrase in facts, f"stance missing for {text!r}: {phrase!r}"
     assert msg.reply_text.await_count >= 1
 
 
@@ -424,7 +476,9 @@ async def test_ronaldo_roast_weaves_line_and_respect_together(
     assert line in final and len(final) > len(line)
     system = _system_prompt(router)
     assert "[BANK LINE" in system
-    assert "بتحترم كريستيانو" in system
+    # v1.14: the respect rides in the <facts> message of the same
+    # turn (the roast turn selects the football slice).
+    assert "بتحترمه" in _facts_message(router)
 
 
 async def test_mbappe_roast_weaves_line_and_hate_together(
@@ -442,4 +496,7 @@ async def test_mbappe_roast_weaves_line_and_hate_together(
     assert line in final and len(final) > len(line)
     system = _system_prompt(router)
     assert "[BANK LINE" in system
-    assert "بتكره ريال مدريد وكليان مبابي" in system
+    # v1.14: the hate rides in the <facts> message of the same turn
+    # (the roast turn selects the football slice).
+    facts = _facts_message(router)
+    assert "مبابي" in facts and "ريال مدريد" in facts

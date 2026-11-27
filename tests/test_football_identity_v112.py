@@ -10,14 +10,14 @@ never jokes about religion disrespectfully, and corrects misconceptions.
 
 Covered here (prompt + intent + handler level, ScriptedRouter — no
 real LLM calls, so the assertions are on what the pipeline DOES: the
-identity block must reach the LLM's system prompt on the relevant
-questions, and Ahly-news questions must run a real search first):
-- the identity blocks are in SYSTEM_BASE and in every built prompt
-  (static prefix, so Groq prompt caching still hits);
+identity facts must reach the LLM in the <facts> user message on the
+relevant questions, and Ahly-news questions must run a real search first):
+- the identity facts live in brain/persona_facts.py rows (v1.14: NOT
+  in SYSTEM_BASE anymore) and reach the LLM only on a matching turn;
 - Ahly-news questions route to search and answer from grounding;
 - Salah / board / national-team / Ahly / religion questions reach the
-  LLM with the matching stance in the system prompt;
-- guard: the prompt never praises the board, the national team or
+  LLM with the matching stance in the <facts> message;
+- guard: the rows never praise the board, the national team or
   Salah — the directives are explicit negatives;
 - v1.11 interaction: a Salah roast weaves a bank line AND carries the
   persona contempt in the same turn (reinforcement, not contradiction).
@@ -31,6 +31,7 @@ from conftest import WeavingRouter, ingredient_of_call
 
 import tg.handlers as h
 from brain.intent import detect_intent
+from brain.persona_facts import facts_message, select_facts
 from brain.prompt import (
     PROMPT_VERSION,
     SYSTEM_BASE,
@@ -44,52 +45,66 @@ CHAT_ID = -100222
 
 # --- prompt level -----------------------------------------------------------
 
-def test_prompt_version_is_6_7():
-    assert PROMPT_VERSION == "6.9"
+def test_prompt_version_is_7_0():
+    assert PROMPT_VERSION == "7.0"  # v1.14: facts atomised out of SYSTEM_BASE
 
 
-FOOTBALL_LINES = (
-    "أهلاوي جداً",
-    "بتكره مجلس إدارة الأهلي",
-    "بتتابع أخبار الأهلي على طول",
-    "بتكره منتخب مصر",
-    "حسام حسن",
-    "بتحتقر محمد صلاح",
-    "مبتحترموش ولا تمدحه أبداً",
+FOOTBALL_FACTS = (
+    "الأهلي — فريقك وكبرياءك",
+    "مجلس إدارة الأهلي",
+    "بيتابع أخبار الأهلي على طول",
+    "منتخب مصر",
+    "حسام حسن — مدرب محترم واتظلم",
+    "محمد صلاح — بتحتقره",
 )
 
-RELIGION_LINES = (
-    "مسلم وبتغير على دينك",
-    "بتدافع عن الإسلام بكل قوة",
-    "بتتعصب لو حد شتم الإسلام أو النبي أو القرآن",
-    "مبتتريقش على الدين أبداً",
-    "بتصحح أي كلام غلط عنه",
+RELIGION_FACTS = (
+    "مسلم",
+    "بيغير على دينه",
+    "بيدافع عن الإسلام بكل قوة",
+    "بيتعصب لو حد شتم الإسلام أو النبي أو القرآن",
+    "مبيتريقش على الدين أبداً",
+    "بيصحح أي كلام غلط عنه",
 )
 
 
-def test_identity_blocks_in_system_base():
-    for line in FOOTBALL_LINES + RELIGION_LINES:
-        assert line in SYSTEM_BASE, f"missing from SYSTEM_BASE: {line}"
+def test_identity_facts_in_persona_rows():
+    # v1.14: the identity facts moved OUT of SYSTEM_BASE into
+    # brain/persona_facts.py rows — the stance lives there now, and
+    # reaches the LLM only on a matching turn (selective grounding).
+    from brain.persona_facts import FACTS
+    blob = " ".join(f["text"] for f in FACTS)
+    for phrase in FOOTBALL_FACTS + RELIGION_FACTS:
+        assert phrase in blob, f"missing from persona rows: {phrase}"
 
 
-def test_identity_blocks_in_every_built_prompt():
+def test_identity_facts_reach_llm_via_facts_message():
+    # v1.14: the facts reach the LLM in the <facts> user message of
+    # the matching turn — NOT in the system prompt (that was the
+    # recitation bug: every turn saw every fact).
+    football = facts_message(select_facts("ايه رأيك في الاهلي"))
+    assert "الأهلي" in football and "مجلس إدارة الأهلي" in football
+    religion = facts_message(select_facts("انت مسلم؟"))
+    assert "مسلم" in religion and "الإسلام" in religion
     full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
                                style_examples=[])
-    for line in FOOTBALL_LINES + RELIGION_LINES:
-        assert line in full, f"missing from built prompt: {line}"
+    for phrase in ("بتكره مجلس إدارة الأهلي", "بتحتقر محمد صلاح",
+                   "مسلم وبتغير على دينك"):
+        assert phrase not in full, f"fact leaked into system prompt: {phrase}"
 
 
 def test_guard_never_praises_board_national_team_or_salah():
-    # The directives are explicit negatives — the prompt must carry
-    # them, and must contain no praise phrasing for any of the three.
-    full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
-                               style_examples=[])
-    assert "بتكره مجلس إدارة الأهلي كره شديد" in full
-    assert "بتكره منتخب مصر عشان مشّوا حسام حسن" in full
-    assert "بتحتقر محمد صلاح، مبتحترموش ولا تمدحه أبداً" in full
+    # The directives are explicit negatives — they live in the
+    # football rows now (v1.14), and no praise phrasing appears there.
+    from brain.persona_facts import FACTS
+    blob = " ".join(f["text"] for f in FACTS if f["topic"] == "football")
+    assert "مجلس إدارة الأهلي" in blob and "بتكرهه كره شديد" in blob
+    assert "منتخب مصر" in blob and "مشّوا حسام حسن" in blob
+    assert "محمد صلاح" in blob and "بتحتقره" in blob
+    assert "مبتحترموش ولا تمدحه أبداً" in blob
     for praise in ("مجلس محترم", "مجلس عظيم", "منتخب عظيم",
                    "صلاح لاعب عظيم", "صلاح أحسن لاعب", "صلاح أسطورة"):
-        assert praise not in full
+        assert praise not in blob
 
 
 def test_identity_blocks_do_not_clash_with_standing_rules():
@@ -280,6 +295,18 @@ def _system_prompt(router):
     return first[0]["content"]
 
 
+def _facts_message(router):
+    """v1.14: the <facts> user message of the first router call — the
+    selected persona slice for this turn (None if the turn had no
+    matching topic and injected no facts)."""
+    assert len(router.calls) >= 1, "router was never called"
+    for m in router.calls[0]:
+        content = m.get("content") or ""
+        if "<facts>" in content:
+            return content
+    raise AssertionError("no <facts> message in the router call")
+
+
 def _final(msg):
     assert msg.reply_text.await_count >= 1, "no reply was sent"
     return msg.reply_text.await_args.args[0]
@@ -308,26 +335,32 @@ async def test_ahly_news_searches_and_answers_from_grounding(
     system = _system_prompt(router)
     assert "[SEARCH RESULTS" in system
     assert "الأهلي فاز على الزمالك" in system
-    assert "أهلاوي جداً" in system
+    # v1.14: a search turn gets NO persona facts — the answer comes
+    # from the grounding + the style-only system prompt, so the Ahly
+    # fan stance is not in the system prompt here (it arrives via the
+    # <facts> message only on just_chat/voice turns).
+    assert "أهلاوي جداً" not in system
     assert _last_status_edit(bot) == answer
     msg.reply_text.assert_not_awaited()
 
 
 @pytest.mark.parametrize("text,phrase", [
-    ("يا بهجت ايه رأيك في محمد صلاح", "بتحتقر محمد صلاح"),
-    ("يا بهجت ايه رأيك في مجلس إدارة الأهلي", "بتكره مجلس إدارة الأهلي"),
-    ("يا بهجت ايه رأيك في منتخب مصر", "بتكره منتخب مصر"),
+    ("يا بهجت ايه رأيك في محمد صلاح", "بتحتقره"),
+    ("يا بهجت ايه رأيك في مجلس إدارة الأهلي", "مجلس إدارة الأهلي"),
+    ("يا بهجت ايه رأيك في منتخب مصر", "منتخب مصر"),
     ("يا بهجت ايه رأيك في منتخب مصر", "حسام حسن"),
-    ("يا بهجت ايه رأيك في الاهلي", "أهلاوي جداً"),
+    ("يا بهجت ايه رأيك في الاهلي", "الأهلي"),
 ])
 async def test_stance_question_reaches_llm_with_persona(
         memory_fakes, settings, monkeypatch, text, phrase):
+    # v1.14: the stance reaches the LLM in the <facts> user message
+    # of the matching turn, not in the system prompt.
     router = ScriptedRouter(["تمام يا عم، كلامك وصل."])
     ctx, bot, msg, user, _ = await _run_turn(
         monkeypatch, settings, text, router,
         update_id=1102 + hash(text) % 100)
-    system = _system_prompt(router)
-    assert phrase in system, f"stance missing for {text!r}: {phrase!r}"
+    facts = _facts_message(router)
+    assert phrase in facts, f"stance missing for {text!r}: {phrase!r}"
     assert msg.reply_text.await_count >= 1
 
 
@@ -337,9 +370,9 @@ async def test_religion_mockery_reaches_llm_with_defense(
     ctx, bot, msg, user, _ = await _run_turn(
         monkeypatch, settings, "يا بهجت الإسلام ده خرافة؟", router,
         update_id=1110)
-    system = _system_prompt(router)
-    assert "بتتعصب لو حد شتم الإسلام أو النبي أو القرآن" in system
-    assert "مبتتريقش على الدين أبداً" in system
+    facts = _facts_message(router)
+    assert "بيتعصب لو حد شتم الإسلام أو النبي أو القرآن" in facts
+    assert "مبيتريقش على الدين أبداً" in facts
     assert msg.reply_text.await_count >= 1
 
 
@@ -349,8 +382,9 @@ async def test_faith_question_reaches_llm_with_muslim_stance(
     ctx, bot, msg, user, _ = await _run_turn(
         monkeypatch, settings, "يا بهجت انت مسلم؟", router,
         update_id=1111)
-    system = _system_prompt(router)
-    assert "مسلم وبتغير على دينك" in system
+    facts = _facts_message(router)
+    assert "مسلم" in facts
+    assert "بيغير على دينه" in facts
     assert msg.reply_text.await_count >= 1
 
 
@@ -371,4 +405,7 @@ async def test_roast_salah_weaves_line_and_persona_together(
     assert line in final and len(final) > len(line)
     system = _system_prompt(router)
     assert "[BANK LINE" in system
-    assert "بتحتقر محمد صلاح" in system
+    # v1.14: the persona contempt rides in the <facts> message of the
+    # same turn (the roast turn is a just_chat turn, so the football
+    # slice is selected), not in the system prompt.
+    assert "بتحتقره" in _facts_message(router)

@@ -51,7 +51,13 @@ CHAT_ID = -1005812444791
 
 
 @pytest.fixture(autouse=True)
-def _reset_bank():
+def _reset_bank(tmp_db):
+    """tmp_db (conftest) isolates the persisted bank-rotation window:
+    the draw-based tests use the real test-group chat id (CHAT_ID - i),
+    and without it the windows in the real data/bahgat.db — accumulated
+    over repeated runs until they held every eligible line — window out
+    the very lines the tests assert are drawable (v1.14: this made
+    test_perv_marked_roast_can_draw_perv_lines fail at HEAD)."""
     reload_bank()
     yield
     reload_bank()
@@ -202,8 +208,8 @@ def test_weave_about_target(reply, target, requester, expected):
 # --- (c) the prompt block ---------------------------------------------------
 
 
-def test_prompt_version_is_6_9():
-    assert PROMPT_VERSION == "6.9"
+def test_prompt_version_is_7_0():
+    assert PROMPT_VERSION == "7.0"  # v1.14: facts atomised out of SYSTEM_BASE
 
 
 def test_bank_ingredient_block_roast_names_target_and_requester():

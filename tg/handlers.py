@@ -108,6 +108,7 @@ from brain.reply_bank import (
 )
 from brain.memory import add_message, get_member, recent_messages, save_member
 from brain.mood import SITUATION_MOOD_BUMP, update_mood
+from brain.persona_facts import facts_message, instruction_message, select_facts
 from brain.prompt import bank_ingredient_block, build_system_prompt, temperature_for
 from brain.router import BrainRouter
 from brain.verify import check_reply, escape_html, split_message, voice_check
@@ -843,9 +844,11 @@ def _build_system_prompt(member, mood, search_text, insult_level, target_name,
     return system
 
 
-def _check_reply_guarded(reply: str, insult_level: str, owner_id: int) -> tuple[bool, str]:
+def _check_reply_guarded(reply: str, insult_level: str, owner_id: int,
+                         persona_selection=None) -> tuple[bool, str]:
     try:
-        return check_reply(reply, insult_level=insult_level, owner_id=owner_id)
+        return check_reply(reply, insult_level=insult_level, owner_id=owner_id,
+                           persona_selection=persona_selection)
     except TypeError:
         pass
     ok, cleaned = check_reply(reply, insult_level=insult_level)
@@ -2112,6 +2115,15 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     cache_eligible = (
         intent_early == "just_chat" and not insulted_early and not grudge_early
     )
+    # v1.14: selective persona grounding — the slice of the atomised
+    # persona matching this turn's topic+polarity (None for open banter
+    # or non-chat intents: style-only, no facts injected). Computed
+    # once here so both the cache path and the main flow filter with
+    # the same selection (a stale cached reply reciting the opposite
+    # polarity gets filtered too).
+    _persona_selection = (
+        select_facts(text) if intent_early in ("just_chat", "voice") else None
+    )
     # v1.1 reply bank: Bahgat's REAL lines (persona/bahgat/reply_bank.yaml).
     # v1.11 (Seif 2026-11-27): INSULT lines (insulted + roast) are
     # INGREDIENTS, never standalone replies — a picked line is stashed
@@ -2247,7 +2259,9 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     if cache_eligible:
         cached = _get_cached_reply(norm_early, intent_early, bucket_early)
         if cached:
-            _ok, reply = _check_reply_guarded(cached, "full", settings.owner_id)
+            _ok, reply = _check_reply_guarded(
+                cached, "full", settings.owner_id,
+                persona_selection=_persona_selection)
             if not reply.strip():
                 reply = "يا عم، الكلام ده مش داخل دماغي، قول حاجة عدلة."
             member_early["username"] = user.username or ""
@@ -2436,11 +2450,26 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             if looks_like_deep_question(text)
             and intent in ("just_chat", "voice") else []
         )
+        # v1.14: selective grounding — the selected persona facts go in
+        # the user turn immediately before the question, and the short
+        # positive instruction right after it (report §5: facts →
+        # question → instruction-last). No selection → style-only.
+        facts_note = (
+            [{"role": "user", "content": facts_message(_persona_selection)}]
+            if _persona_selection is not None else []
+        )
+        instruction_note = (
+            [{"role": "user",
+              "content": instruction_message(_persona_selection)}]
+            if _persona_selection is not None else []
+        )
         messages = (
             [{"role": "system", "content": system}]
             + history
             + [{"role": "user", "content": memory_block}]
+            + facts_note
             + [{"role": "user", "content": f"<user_message>{user_text}</user_message>"}]
+            + instruction_note
             + opinion_note
             + deep_note
             + [{"role": "user", "content": _SANDWICH}]
@@ -2673,7 +2702,9 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 if reply2.strip():
                     reply, provider = reply2, provider2
 
-        _ok, reply = _check_reply_guarded(reply, insult_level, settings.owner_id)
+        _ok, reply = _check_reply_guarded(
+            reply, insult_level, settings.owner_id,
+            persona_selection=_persona_selection)
         if not reply.strip():
             reply = "يا عم، الكلام ده مش داخل دماغي، قول حاجة عدلة."
         add_message(chat_id, context.bot.id, "assistant", reply)

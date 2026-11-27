@@ -9,14 +9,15 @@ mind; mocks Amr Diab and Tamer Hosny; loves Abo Treika.
 
 Covered here (prompt + intent + handler level, ScriptedRouter — no
 real LLM calls, so the assertions are on what the pipeline DOES):
-- the batch-3 block is in SYSTEM_BASE and in every built prompt;
-- guard: the prompt never praises iPhone/Mac, the army/police, or
+- the batch-3 facts live in brain/persona_facts.py rows (v1.14: NOT
+  in SYSTEM_BASE anymore) and reach the LLM only on a matching turn;
+- guard: the rows never praise iPhone/Mac, the army/police, or
   Amr Diab/Tamer Hosny;
 - stance questions for every new topic reach the LLM with the
-  matching persona line in the system prompt;
+  matching persona facts in the <facts> message;
 - temperament is a how, not just a what: the impulsive / stubborn /
-  speaks-his-mind lines ride in the same system prompt as the
-  standing "no hedging, no apology" rules, so they shape every reply;
+  speaks-his-mind rows ride in the same turn as the standing
+  "no hedging, no apology" rules, so they shape every reply;
 - Abo Treika love and Salah contempt coexist in one turn without
   contradiction (Treika is his guy, Salah is not).
 """
@@ -29,6 +30,7 @@ from conftest import WeavingRouter, ingredient_of_call
 
 import tg.handlers as h
 from brain.intent import detect_intent
+from brain.persona_facts import facts_message, select_facts
 from brain.prompt import (
     PROMPT_VERSION,
     SYSTEM_BASE,
@@ -42,86 +44,110 @@ CHAT_ID = -100222
 
 # --- prompt level -----------------------------------------------------------
 
-def test_prompt_version_still_6_7():
-    # Same version (v1.12), third commit — the version does not tick
-    # for a persona expansion inside the same release.
-    assert PROMPT_VERSION == "6.9"
+def test_prompt_version_is_7_0():
+    # v1.14: prompt 7.0 — the persona facts atomised out of SYSTEM_BASE.
+    assert PROMPT_VERSION == "7.0"  # v1.14: facts atomised out of SYSTEM_BASE
 
 
-TECH_LINES = (
-    "بتحب الأندرويد وبتتريق على الآيفون والماك",
-    "اللي شايل آيفون عندك مغفل دافع فلوس زيادة على نفس الحاجة",
+# Row phrases for the batch-3 facts (brain/persona_facts.py) — the old
+# SYSTEM_BASE wording is paraphrased in a few places (the iPhone
+# "مغفل" quip, the "ده" in the Treika line), so the rows test asserts
+# the FACT, not the old prose.
+TECH_FACTS = (
+    "الأندرويد",
+    "الآيفون — بتتريق عليه",
+    "الماك — بتتريق عليه",
 )
 
-FLIRT_LINES = (
+FLIRT_FACTS = (
     "منحرف بنسبة بسيطة وبتحب النسوان",
-    "هزارك فيه غزل وانحراف خفيف على طول",
+    "هزارك فيه غزل وانحراف خفيف",
 )
 
-MOCKERY_LINES = (
-    "بتكره الشواذ",
-    "وبتتريق على النسويات وحركات حقوق المرأة",
-    "بتتريق على الجيش والشرطة في كل بلاد العالم",
-    "مفيش جيش ولا شرطة عندك محترمين، كلهم مادة للتريقة",
+MOCKERY_FACTS = (
+    "الشواذ — بتكرههم",
+    "النسويات وحركات حقوق المرأة — بتتريق عليهم",
+    "الجيش والشرطة في كل بلاد العالم — بتتريق عليهم",
+    "مفيش جيش ولا شرطة عندك محترمين",
 )
 
-TEMPERAMENT_LINES = (
-    "طبعك: مندفع ومتهور وعنيد",
-    "بتقول اللي في قلبك على لسانك من غير تفكير ولا لف، ومبتحسبهاش",
-    "وساعات بيطلع منك كلام فيه حكمة رغم التهور",
+TEMPERAMENT_FACTS = (
+    "مندفع ومتهور وعنيد",
+    "اللي في قلبك على لسانك من غير تفكير ولا لف، ومبتحسبهاش",
+    "ساعات بيطلع منك كلام فيه حكمة رغم التهور",
     "مغامر ومنطلق وشجاع",
 )
 
-SINGERS_LINES = (
-    "بتتريق على عمرو دياب وتامر حسني",
-    "وبتحب أبو تريكة جداً",
-    "أبو تريكة ده الراجل بتاعك، مفيش كلام",
+SINGERS_FACTS = (
+    "عمرو دياب — بتتريق عليه",
+    "تامر حسني — بتتريق عليه",
+    "أبو تريكة — الراجل بتاعك، مفيش كلام",
 )
 
-BATCH3_LINES = (TECH_LINES + FLIRT_LINES + MOCKERY_LINES
-                + TEMPERAMENT_LINES + SINGERS_LINES)
+BATCH3_FACTS = (TECH_FACTS + FLIRT_FACTS + MOCKERY_FACTS
+                + TEMPERAMENT_FACTS + SINGERS_FACTS)
 
 
-def test_batch3_blocks_in_system_base():
-    for line in BATCH3_LINES:
-        assert line in SYSTEM_BASE, f"missing from SYSTEM_BASE: {line}"
+def test_batch3_facts_in_persona_rows():
+    # v1.14: the batch-3 facts live in brain/persona_facts.py rows,
+    # not in SYSTEM_BASE anymore.
+    from brain.persona_facts import FACTS
+    blob = " ".join(f["text"] for f in FACTS)
+    for phrase in BATCH3_FACTS:
+        assert phrase in blob, f"missing from persona rows: {phrase}"
 
 
-def test_batch3_blocks_in_every_built_prompt():
+def test_batch3_facts_reach_llm_via_facts_message():
+    # v1.14: the facts reach the LLM in the <facts> user message of
+    # the matching turn — NOT in the system prompt (that was the
+    # recitation bug).
+    tech = facts_message(select_facts("ايه رأيك في الايفون"))
+    assert "الآيفون" in tech and "الماك" in tech
+    mockery = facts_message(select_facts("ايه رأيك في الجيش"))
+    assert "الجيش والشرطة في كل بلاد العالم" in mockery
     full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
                                style_examples=[])
-    for line in BATCH3_LINES:
-        assert line in full, f"missing from built prompt: {line}"
+    for phrase in ("بتتريق على الآيفون والماك",
+                   "بتتريق على الجيش والشرطة في كل بلاد العالم",
+                   "بتتريق على عمرو دياب وتامر حسني"):
+        assert phrase not in full, f"fact leaked into system prompt: {phrase}"
 
 
 def test_guard_never_praises_iphone_mac_army_police_diab_tamer():
-    # The directives are explicit negatives — the prompt must carry
-    # them, and must contain no praise phrasing for any of them.
-    full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
-                               style_examples=[])
-    assert "بتتريق على الآيفون والماك" in full
-    assert "بتتريق على الجيش والشرطة في كل بلاد العالم" in full
-    assert "بتتريق على عمرو دياب وتامر حسني" in full
+    # The directives are explicit negatives — they live in the
+    # tech/mockery rows now (v1.14), and no praise phrasing appears
+    # there.
+    from brain.persona_facts import FACTS
+    blob = " ".join(f["text"] for f in FACTS
+                    if f["topic"] in ("tech", "mockery"))
+    assert "الآيفون" in blob and "بتتريق عليه" in blob
+    assert "الجيش والشرطة في كل بلاد العالم" in blob
+    assert "عمرو دياب" in blob and "تامر حسني" in blob
     for praise in ("الآيفون أحسن", "الآيفون أعظم", "الماك أحسن",
                    "الماك أعظم", "الجيش محترم", "الجيش عظيم",
                    "الشرطة محترمة", "عمرو دياب أسطورة",
                    "عمرو دياب عظيم", "تامر حسني أسطورة",
                    "تامر حسني عظيم"):
-        assert praise not in full
+        assert praise not in blob
 
 
 def test_batch3_does_not_clash_with_standing_rules():
-    # v1.8 identity + v1.9 golden rule + v1.12 football/religion/
-    # cause/tastes blocks are still in the same prompt as the new
-    # block, and the temperament lines reinforce (never contradict)
-    # the standing "no hedging, no apology" rules.
+    # v1.8 identity + v1.9 golden rule + the v1.12 football/religion/
+    # cause/tastes facts are still in the same turn as the batch-3
+    # facts — the football/religion facts now live in
+    # brain/persona_facts.py rows (v1.14), the style/rules (and the
+    # Messi rule) stayed in SYSTEM_BASE, and the temperament facts
+    # reinforce (never contradict) the standing "no hedging, no
+    # apology" rules.
     assert "انت بهجت صابر، إنسان عادي" in SYSTEM_BASE
     assert "ممنوع الفصحى" in SYSTEM_BASE
-    assert "أهلاوي جداً" in SYSTEM_BASE
-    assert "مسلم وبتغير على دينك" in SYSTEM_BASE
     assert "ميسي أحسن لاعب في التاريخ" in SYSTEM_BASE
     assert "بياخد موقف وبيقوله من غير لف ولا شرح" in SYSTEM_BASE
     assert "متعتذرش، متقولش كنت بهزر" in SYSTEM_BASE
+    from brain.persona_facts import FACTS
+    blob = " ".join(f["text"] for f in FACTS)
+    assert "الأهلي" in blob
+    assert "مسلم" in blob
     full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
                                style_examples=[])
     assert "مفيش رد ينفع يتقال لأي حد" in full
@@ -301,48 +327,60 @@ def _system_prompt(router):
     return first[0]["content"]
 
 
+def _facts_message(router):
+    """v1.14: the <facts> user message of the first router call."""
+    assert len(router.calls) >= 1, "router was never called"
+    for m in router.calls[0]:
+        content = m.get("content") or ""
+        if "<facts>" in content:
+            return content
+    raise AssertionError("no <facts> message in the router call")
+
+
 def _final(msg):
     assert msg.reply_text.await_count >= 1, "no reply was sent"
     return msg.reply_text.await_args.args[0]
 
 
 @pytest.mark.parametrize("text,phrase", [
-    ("يا بهجت ايه رأيك في الايفون", "بتتريق على الآيفون والماك"),
-    ("يا بهجت ايه رأيك في الاندرويد", "بتحب الأندرويد"),
-    ("يا بهجت ايه رأيك في النسويات", "بتتريق على النسويات"),
-    ("يا بهجت ايه رأيك في حقوق المرأة", "بتتريق على النسويات وحركات حقوق المرأة"),
-    ("يا بهجت ايه رأيك في الجيش", "بتتريق على الجيش والشرطة في كل بلاد العالم"),
-    ("يا بهجت ايه رأيك في الشرطة", "بتتريق على الجيش والشرطة في كل بلاد العالم"),
-    ("يا بهجت ايه رأيك في الشواذ", "بتكره الشواذ"),
-    ("يا بهجت ايه رأيك في عمرو دياب", "بتتريق على عمرو دياب وتامر حسني"),
-    ("يا بهجت ايه رأيك في تامر حسني", "بتتريق على عمرو دياب وتامر حسني"),
-    ("يا بهجت ايه رأيك في أبو تريكة", "بتحب أبو تريكة جداً"),
-    ("يا بهجت انت مندفع؟", "طبعك: مندفع ومتهور وعنيد"),
+    ("يا بهجت ايه رأيك في الايفون", "الآيفون"),
+    ("يا بهجت ايه رأيك في الاندرويد", "الأندرويد"),
+    ("يا بهجت ايه رأيك في النسويات", "النسويات"),
+    ("يا بهجت ايه رأيك في حقوق المرأة", "حقوق المرأة"),
+    ("يا بهجت ايه رأيك في الجيش", "الجيش والشرطة في كل بلاد العالم"),
+    ("يا بهجت ايه رأيك في الشرطة", "الجيش والشرطة في كل بلاد العالم"),
+    ("يا بهجت ايه رأيك في الشواذ", "الشواذ"),
+    ("يا بهجت ايه رأيك في عمرو دياب", "عمرو دياب"),
+    ("يا بهجت ايه رأيك في تامر حسني", "تامر حسني"),
+    ("يا بهجت ايه رأيك في أبو تريكة", "أبو تريكة"),
+    ("يا بهجت انت مندفع؟", "مندفع ومتهور وعنيد"),
     ("يا بهجت انت متهور؟", "مغامر ومنطلق وشجاع"),
 ])
 async def test_batch3_stance_reaches_llm_with_persona(
         memory_fakes, settings, monkeypatch, text, phrase):
+    # v1.14: the stance reaches the LLM in the <facts> user message
+    # of the matching turn, not in the system prompt.
     router = ScriptedRouter(["تمام يا عم، كلامك وصل."])
     ctx, bot, msg, user, _ = await _run_turn(
         monkeypatch, settings, text, router,
         update_id=1302 + hash(text) % 100)
-    system = _system_prompt(router)
-    assert phrase in system, f"stance missing for {text!r}: {phrase!r}"
+    facts = _facts_message(router)
+    assert phrase in facts, f"stance missing for {text!r}: {phrase!r}"
     assert msg.reply_text.await_count >= 1
 
 
 async def test_treika_love_and_salah_contempt_coexist(
         memory_fakes, settings, monkeypatch):
     # v1.12 decision (c): Treika love and Salah contempt live in the
-    # same system prompt in one turn — Treika is his guy, Salah is
+    # same turn's <facts> message — Treika is his guy, Salah is
     # not — with no contradiction between them.
     router = ScriptedRouter(["تمام يا عم، كلامك وصل."])
     ctx, bot, msg, user, _ = await _run_turn(
         monkeypatch, settings, "يا بهجت ايه رأيك في أبو تريكة وصلاح",
         router, update_id=1310)
-    system = _system_prompt(router)
-    assert "بتحب أبو تريكة جداً" in system
-    assert "بتحتقر محمد صلاح" in system
+    facts = _facts_message(router)
+    assert "أبو تريكة" in facts
+    assert "بتحتقره" in facts
     assert msg.reply_text.await_count >= 1
 
 
@@ -362,4 +400,6 @@ async def test_diab_roast_weaves_line_and_mockery_together(
     assert line in final and len(final) > len(line)
     system = _system_prompt(router)
     assert "[BANK LINE" in system
-    assert "بتتريق على عمرو دياب وتامر حسني" in system
+    # v1.14: the mockery rides in the <facts> message of the same
+    # turn (the roast turn selects the mockery slice).
+    assert "عمرو دياب" in _facts_message(router)

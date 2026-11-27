@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "6.9"
+    assert PROMPT_VERSION == "7.0"  # v1.14: facts atomised out of SYSTEM_BASE
 
 
 def test_system_base_v11_budget():
@@ -44,8 +44,11 @@ def test_system_base_v11_budget():
     # religion): budget < 1800. v1.12 expansion (same morning, second
     # commit): budget < 2800 for the cause + tastes block. v1.12 batch 3
     # (same morning, third commit): budget < 3600 for the tech tastes,
-    # temperament and mockery targets block.
-    assert len(SYSTEM_BASE) < 3600
+    # temperament and mockery targets block. v1.14 shrinks it back:
+    # the fact blocks moved OUT into brain/persona_facts.py (atomised
+    # rows, injected per turn only when the turn's topic matches) —
+    # SYSTEM_BASE keeps style/rules only. Budget < 1800 again.
+    assert len(SYSTEM_BASE) < 1800
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
                  "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>",
                  "إنسان عادي", "مش بوت"):
@@ -189,8 +192,10 @@ def test_prompt_size_reported(capsys):
     # test_system_base_v11_budget). v1.12: budget < 1800 for the
     # football + religion identity blocks. v1.12 expansion: < 2800
     # for the cause + tastes block. v1.12 batch 3: < 3600 for the
-    # tech tastes, temperament and mockery targets block.
-    assert len(SYSTEM_BASE) < 3600
+    # tech tastes, temperament and mockery targets block. v1.14:
+    # facts atomised out of SYSTEM_BASE (brain/persona_facts.py) —
+    # budget < 1800 again.
+    assert len(SYSTEM_BASE) < 1800
 
 
 def test_memory_block_unchanged():
