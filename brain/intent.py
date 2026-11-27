@@ -455,7 +455,7 @@ def looks_stalling(reply: str) -> bool:
     return any(normalize_arabic(m) in r for m in STALL_MARKERS)
 
 
-_TARGET_RE = re.compile(r"اشتمي?\s+@?([A-Za-z0-9_\u0600-\u06FF]+)")
+_TARGET_RE = re.compile(r"اشتم(?:وا|ي)?\s+@?([A-Za-z0-9_\u0600-\u06FF]+)")
 
 
 def extract_insult_target(text: str) -> str | None:
@@ -595,7 +595,7 @@ def detect_roast_situation(text: str) -> str:
     "general" while "اشتم محمد عشان بيتباهى" is "arrogant"."""
     t = normalize_arabic(text or "")
     rest = _TARGET_RE.sub(" ", t)
-    rest = re.sub(r"(?<!\w)اشتمي?(?!\w)", " ", rest)
+    rest = re.sub(r"(?<!\w)اشتم(?:وا|ي)?(?!\w)", " ", rest)
     rest = re.sub(r"(?<!\w)بهجت(?!\w)", " ", rest)
     if _has(rest, _ROAST_ARROGANT_WORDS):
         return "arrogant"
@@ -608,3 +608,59 @@ def detect_roast_situation(text: str) -> str:
     if _has(rest, _ROAST_PERV_WORDS):
         return "perv"
     return "general"
+
+
+# v1.13: gender / number of the roast target, from the request's own
+# wording only. No name list, no guessing: Arabic names are not
+# reliably gendered by string rules, and a wrong guess would serve
+# feminine lines to men (the exact bug). The feminine signal is the
+# imperative "اشتمي" or a feminine marker word after the target
+# ("البنت", "الست"); the plural signal is "اشتموا", a plural marker
+# ("العيال", "الناس", "دول"), or a collective target (a team is
+# addressed as plural — "انتو"). Anything else -> None, the
+# masculine/singular default (Arabic unmarked default).
+_PLURAL_TARGETS = frozenset({
+    "الزمالك", "الاهلي", "المنتخب", "ريال مدريد", "برشلونه",
+})
+
+
+def detect_roast_target_gender(text: str) -> str | None:
+    """'f' when the roast request is feminine-marked, else None."""
+    t = normalize_arabic(text or "")
+    if re.search(r"اشتمي\s", t):
+        return "f"
+    if _has(t, ["البنت", "الست"]):
+        return "f"
+    return None
+
+
+def detect_roast_target_number(text: str) -> str | None:
+    """'plural' when the roast request is plural-marked, else None."""
+    t = normalize_arabic(text or "")
+    if re.search(r"(?<!\w)اشتموا(?!\w)", t):
+        return "plural"
+    if _has(t, ["العيال", "الناس", "دول"]):
+        return "plural"
+    target = extract_insult_target(text)
+    if target and normalize_arabic(target) in _PLURAL_TARGETS:
+        return "plural"
+    return None
+
+
+# v1.13: deep / personal questions ("انت حاسس إنك مبسوط في حياتك ولا
+# ناقصك حاجة؟", "أكتر حاجة ندمت عليها إيه؟") — the bot dodged these
+# with an insult in four consecutive conversation runs (v1.9–v1.12).
+# The fix is a prompt note (answer-first), not a bank pick: these
+# turns never reach the bank. Keyword heuristic only; a false positive
+# just adds a mild answer-first instruction to a chat turn.
+_DEEP_WORDS = [
+    "حاسس", "مبسوط", "ناقصك", "ندمت", "ندمان", "خايف", "بتخاف",
+    "خوف", "حلمك", "بتحلم", "حياتك", "فرحان", "زعلان", "مكتئب",
+    "وحيد", "بتتمنى", "نفسك",
+]
+
+
+def looks_like_deep_question(text: str) -> bool:
+    """True when the message asks a personal / deep question about
+    the bot's feelings, life, regrets or dreams."""
+    return _has(normalize_arabic(text or ""), _DEEP_WORDS)

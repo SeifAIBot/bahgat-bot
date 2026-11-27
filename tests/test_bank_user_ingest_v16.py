@@ -186,7 +186,7 @@ def test_round3_roast_reachable_and_targeted():
     assert len(user_roast) == 10  # 4 round 1 + 1 round 2 + 5 round 3
     generic = {e["line"] for e in bank["roast"]
                if e.get("target") is None}
-    assert len(generic) == 20
+    assert len(generic) == 19  # v1.13: ro-39 targets كريستيانو
     # A roast of anyone else never serves the Mido line.
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = {
@@ -218,11 +218,14 @@ def test_round3_family_lines_never_served_to_members(monkeypatch):
             "يا بهجت اشتم محمد", chat_id=CHAT_ID,
             target_is_member=None) != ln
     # Non-member reachability: sample many draws; both family lines
-    # must appear (they are in the non-member generic pool).
+    # must appear (they are in the non-member generic pool). v1.13:
+    # ro-40 is plural-addressed ("يا ولاد..."), so the draws use the
+    # plural imperative — a bare singular roast correctly never draws
+    # it, while ro-42 (singular) would appear either way.
     monkeypatch.undo()
     seen = {
         match_reply_bank(
-            "يا بهجت اشتم محمد", chat_id=CHAT_ID,
+            "يا بهجت اشتموا محمد", chat_id=CHAT_ID,
             target_is_member=False)
         for _ in range(300)
     }

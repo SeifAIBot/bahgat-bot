@@ -45,7 +45,7 @@ CHAT_ID = -100222
 def test_prompt_version_still_6_7():
     # Same version (v1.12), third commit — the version does not tick
     # for a persona expansion inside the same release.
-    assert PROMPT_VERSION == "6.8"
+    assert PROMPT_VERSION == "6.9"
 
 
 TECH_LINES = (

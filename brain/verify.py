@@ -122,6 +122,17 @@ def _leaks(text: str, owner_id=None) -> bool:
     return any(p.search(text) for p in _KEY_PATTERNS)
 
 
+# v1.13: internal instruction blocks the LLM sometimes echoes into its
+# reply ([MEMORY] is sent as a user-role message; [BANK LINE] sits in
+# the system prompt). They are never legitimate reply content, so
+# check_reply strips them. A reply that was ONLY a leaked block comes
+# out empty and the handler's empty-reply fallback answers instead.
+_INTERNAL_BLOCK_RES = [
+    re.compile(r"\[MEMORY\].*?\[/MEMORY\]", re.DOTALL),
+    re.compile(r"\[BANK LINE.*?\].*?\[/BANK LINE\]", re.DOTALL),
+]
+
+
 def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[bool, str]:
     """Returns (ok, cleaned_text).
 
@@ -135,9 +146,20 @@ def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[b
       one. Answers about OTHER bots/people are untouched.
     - Leakage (owner id / prompt internals / key-like strings): the whole
       reply is replaced with a deflection.
+    - v1.13: markdown bold markers (** / __) are stripped (the LLM wraps
+      woven bank lines in them), and internal instruction blocks the
+      model echoed ([MEMORY]...[/MEMORY], [BANK LINE]...[/BANK LINE])
+      are removed — live 2026-11-27 a [MEMORY] block leaked into a
+      user-facing reply. Stripping happens FIRST, before the other
+      checks, so a reply that was only a leaked block falls through to
+      the handler's empty-reply fallback.
     """
     cleaned = text or ""
     ok = True
+    cleaned = cleaned.replace("**", "").replace("__", "")
+    for _block_re in _INTERNAL_BLOCK_RES:
+        cleaned = _block_re.sub("", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     if insult_level == "personal_only" and contains_family(cleaned):
         cleaned = _strip_family_sentences(cleaned)
         if not cleaned:

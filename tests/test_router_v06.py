@@ -394,13 +394,16 @@ def test_output_caps(tmp_path):
     calls.clear()
     asyncio.run(router.chat([{"role": "user", "content": "hi"}], hard=True, max_tokens=600))
     assert calls[0]["max_completion_tokens"] == 600
-    # No override: groq defaults to 1500 for both simple and hard.
+    # No override: groq defaults to 3000 for both simple and hard
+    # (v1.13: raised from 1500 — the truncation fix; reasoning tokens
+    # count against max_completion_tokens, so a reasoning-heavy turn
+    # could eat the whole 1500 budget before the visible reply).
     calls.clear()
     asyncio.run(router.chat([{"role": "user", "content": "hi"}], hard=False))
-    assert calls[0]["max_completion_tokens"] == 1500
+    assert calls[0]["max_completion_tokens"] == 3000
     calls.clear()
     asyncio.run(router.chat([{"role": "user", "content": "hi"}], hard=True))
-    assert calls[0]["max_completion_tokens"] == 1500
+    assert calls[0]["max_completion_tokens"] == 3000
     # Gemini defaults to 4000 (groq entries fail through to flash-lite).
     # Fresh router + fresh DB: usage from the earlier chats would
     # reorder the plan via least-used-first.
@@ -414,7 +417,8 @@ def test_output_caps(tmp_path):
     asyncio.run(router.chat([{"role": "user", "content": "hi"}], hard=False))
     gemini_calls = [c for c in calls if c["model"] == "gemini-3.5-flash-lite"]
     assert gemini_calls and gemini_calls[0]["max_completion_tokens"] == 4000
-    # Cerebras / NIM / OpenRouter default to 1500 (fresh router + DB).
+    # Cerebras / NIM / OpenRouter default to 3000 (fresh router + DB;
+    # v1.13: raised from 1500 with the groq cap — same truncation fix).
     router = _router(tmp_path)
     router.db = tmp_path / "router-cerebras.db"
     calls.clear()
@@ -423,7 +427,7 @@ def test_output_caps(tmp_path):
                             "openai/gpt-oss-120b"})
     asyncio.run(router.chat([{"role": "user", "content": "hi"}], hard=False))
     cerebras_calls = [c for c in calls if c["model"] == "gpt-oss-120b"]
-    assert cerebras_calls and cerebras_calls[0]["max_completion_tokens"] == 1500
+    assert cerebras_calls and cerebras_calls[0]["max_completion_tokens"] == 3000
     assert "include_reasoning" not in cerebras_calls[0]  # Groq-only kwarg
 
 

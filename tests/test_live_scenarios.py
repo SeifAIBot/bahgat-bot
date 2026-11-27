@@ -252,15 +252,15 @@ def _yt_stub(monkeypatch, calls, n=3):
 
 
 async def _run_turn(monkeypatch, settings, text, router, *,
-                    chat_id=CHAT_ID, user_id=777, update_id=100,
-                    reply_to=None):
+                    chat_id=CHAT_ID, user_id=777, first_name="Ahmed",
+                    update_id=100, reply_to=None):
     """One full turn through _on_group_message_inner (real pipeline,
     fake sends). Returns (ctx, bot, msg, user)."""
     _quota_ok(monkeypatch)
     bot = FakeBot()
     ctx = make_ctx(bot, {"settings": settings, "router": router,
                          "yt_requests": {}})
-    user = FakeUser(user_id, first_name="Ahmed")
+    user = FakeUser(user_id, first_name=first_name)
     msg = FakeMessage(text, chat_id, user, reply_to=reply_to)
     await h._on_group_message_inner(
         make_update(msg, user, chat_id, update_id=update_id), ctx)
@@ -657,6 +657,56 @@ async def test_roast_sisi_handler_end_to_end(
     assert len(router.calls) == 30
     assert grounding_calls == []
     assert "السيسي" in seen_targets
+
+
+class _MisdirectedRouter:
+    """v1.13: weaves the picked line into a reply about the requester
+    (Seif) instead of the roast target — the live v1.11 failure."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def chat(self, messages, hard=False, temperature=None,
+                   max_tokens=None, **kw):
+        self.calls.append(messages)
+        line = ingredient_of_call(messages)
+        return (f"يا سيف، {line}، وانت اللي غلطان يا معفن.", "groq", 10)
+
+
+async def test_roast_tamer_misdirected_weave_falls_back_to_line(
+        memory_fakes, settings, tmp_db, monkeypatch):
+    # v1.13: "اشتم تامر" with a draft that weaves the line into a
+    # reply about Seif instead of تامر -> the line goes out verbatim.
+    # The requester is the owner (first_name "سيف") so the gate's
+    # Arabic owner aliases apply.
+    grounding_calls = []
+    _grounding_stub(monkeypatch, grounding_calls)
+    router = _MisdirectedRouter()
+    ctx, bot, msg, user = await _run_turn(
+        monkeypatch, settings, "يا بهجت اشتم تامر", router,
+        user_id=OWNER_ID, first_name="سيف", update_id=920)
+    line = ingredient_of_call(router.calls[0])
+    assert line is not None, "no [BANK LINE] ingredient in the LLM call"
+    final = msg.reply_text.await_args.args[0]
+    assert final == line
+
+
+async def test_roast_messi_coherent_defense_no_feminine_line(
+        memory_fakes, settings, tmp_db, monkeypatch):
+    # v1.13: "اشتم ميسي" — the Messi guard means no bank line at all;
+    # the plain LLM turn defends him. A coherent defense names ميسي
+    # and never carries the feminine ro-23.
+    grounding_calls = []
+    _grounding_stub(monkeypatch, grounding_calls)
+    router = ScriptedRouter(
+        ["ميسي ده أسطورة يا عم، أحسن لاعب في التاريخ، وانت اللي غبي."])
+    ctx, bot, msg, user = await _run_turn(
+        monkeypatch, settings, "يا بهجت اشتم ميسي", router, update_id=921)
+    assert len(router.calls) == 1
+    assert ingredient_of_call(router.calls[0]) is None
+    final = msg.reply_text.await_args.args[0]
+    assert "ميسي" in final
+    assert "بطلي تعريص يا وسخة" not in final
 
 
 async def test_opinion_stance_end_to_end(

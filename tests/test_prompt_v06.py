@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "6.8"
+    assert PROMPT_VERSION == "6.9"
 
 
 def test_system_base_v11_budget():

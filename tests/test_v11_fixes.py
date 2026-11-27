@@ -138,7 +138,7 @@ def test_opinion_ask_detection():
 
 
 def test_prompt_version_and_stance():
-    assert PROMPT_VERSION == "6.8"
+    assert PROMPT_VERSION == "6.9"
     # Behaviour-as-verbs + agenda + anti-softening (research method #3).
     assert "بيرد على الشتيمة بشتيمة أقوى" in SYSTEM_BASE
     assert "عندك رأي في كل حاجة" in SYSTEM_BASE
@@ -387,10 +387,13 @@ def test_bank_rotation_never_repeats_consecutively():
     ]
     for i, p in enumerate(picks):
         assert p not in picks[max(0, i - 5):i]
-    # And the full insult pool (44 lines) is covered, not just 2-3 favourites.
+    # And the full insult pool (42 reachable lines) is covered, not
+    # just 2-3 favourites. v1.13: 44 served minus in-09/in-38, the two
+    # generic feminine lines, which go dormant for insulted comebacks
+    # under the gender gate (they carry no gender signal to match).
     # 400 draws: a given line is picked with p≈1/39 per draw (44 - 5 window),
     # so missing one entirely is ~1e-5 — effectively deterministic.
-    assert len(set(picks)) == 44
+    assert len(set(picks)) == 42
     # Small pools (greeting, 4 served lines) reset after exhaustion, so
     # each 4-block is a full distinct cycle — the v1.1 pattern (v1.6
     # phase 2: the reset is a deterministic least-recently-used cycle).

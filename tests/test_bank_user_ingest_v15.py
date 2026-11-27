@@ -127,7 +127,7 @@ def test_round2_roast_reachable_for_any_target():
     assert len(user_roast) == 10  # 4 round 1 + 1 round 2 + 5 round 3
     generic = {e["line"] for e in bank["roast"]
                if e.get("target") is None}
-    assert len(generic) == 20
+    assert len(generic) == 19  # v1.13: ro-39 targets كريستيانو
     assert NEW_ROAST[0] in generic
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = {

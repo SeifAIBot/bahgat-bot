@@ -116,3 +116,36 @@ never admits bot, never a banned AI phrase? voice when apt?
   vs 1 in v1.9). The deep-question dodge is now a persistent
   defect — fix candidate: answer personal/deep questions for
   real instead of deflecting by insult.
+
+### v1.12 — conversation test, 2026-11-27 07:37–07:46 EET, DONE
+
+- 8/8 replied, all text, delays 10–29 s. No voice notes.
+  Follow-up riffs 4/8 (messages 3, 6, 7, 8) — meets the
+  at-least-half bar exactly (vs 3/8 in v1.11).
+- Topics used (do NOT reuse next run): favorite song right now;
+  fight-with-a-friend advice dilemma; Yehia Azzam video gossip;
+  happiness deep question ("انت حاسس إنك مبسوط في حياتك ولا
+  ناقصك حاجة؟"); prank planning; riffs on his words (béchamel
+  prank, salt, fake iPhone).
+- Human-like: Yehia Azzam gossip engaged properly ("راجل محترم
+  ودمه خفيف وبيفهم"); prank ideas are real and in character
+  (extra-salty béchamel, fake iPhone); reply 8 finished the
+  cut-off sentence from reply 7 when asked to continue.
+- Bot-tells: deep question dodged a FOURTH run in a row (insult
+  deflection + cut off mid-word "قد"); TRUNCATION SEVERE —
+  3/8 replies cut off (#2 ends "ليل ن", #4 ends "قد", #7 is
+  ONLY "يا حمار يا سيف،"); dodges 3/8 (#1 named no song, #2
+  no advice, #4 deep question); opener repetition 6/8 open
+  with identical "يا حمار يا سيف،" (word order flipped from
+  the matrix run's "يا سيف يا حمار").
+- Verdict vs v1.11: better on follow-ups (4/8 vs 3/8), same on
+  voice (none); WORSE on the two things that matter most
+  (deep-question dodge now 4 runs running; truncation 3/8 vs
+  0/8 in v1.11's corrected run). Truncation is now the top
+  v1.13 defect. Suspect (unverified, logs trapped on Cloady):
+  reasoning tokens eating the 1500-token completion budget
+  (GPT-OSS/Gemini reasoning counts against
+  max_completion_tokens) — visible replies are only 4–20
+  tokens. Fix: raise the cap for reasoning families +
+  treat finish_reason=length as retry/continue, never send
+  a truncated draft as-is.

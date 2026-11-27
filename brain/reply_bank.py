@@ -79,6 +79,8 @@ from brain import memory as _memory
 from brain.intent import (
     detect_insult_situation,
     detect_roast_situation,
+    detect_roast_target_gender,
+    detect_roast_target_number,
     extract_insult_target,
     looks_like_insult,
     looks_like_opinion_ask,
@@ -278,38 +280,31 @@ def _record_pick(chat_id: int, category: str, line_id: str,
         pass
 
 
-def _pick(
-    category: str,
-    chat_id: int,
-    member_safe_only: bool = True,
-    target: str | None = None,
-    situation: str | None = None,
-    user_id: int | None = None,
-) -> str | None:
-    """Random line from a category, preferring lines tagged with
-    `situation` (v1.6 phase 2) and excluding the no-repeat window
-    (persisted last 25 per chat + last 10 per user + in-memory last 5).
-    member_safe_only=True (default) excludes lines tagged
-    `member_safe: false` — family-insult lines, served only when the
-    caller has established a resolved non-member target.
-    target (roast only): when given, only generic lines (no `target:`
-    field) and lines whose `target:` matches it are eligible; when no
-    line fits, the pool is the generic lines only — and if there are
-    no generic lines either, None (never a mismatched line). When
-    target is None (every other category) there is no filtering.
-    situation: when given and not "general", lines whose `situations:`
-    list contains it are preferred. When the situation has NO tagged
-    line in the eligible pool (e.g. cowardly — no roast line carries
-    it yet), the preference falls to `general`-tagged lines. When the
-    preferred lines are all inside the no-repeat window, the fallback
-    order is: `general` lines not in the window, then any line not in
-    the window, then — pool exhausted — the least-recently-used line
-    (deterministic, see _least_recently_used)."""
-    entries = load_bank().get(category) or []
-    if member_safe_only:
-        entries = [e for e in entries if e.get("member_safe", True) is not False]
-    if target is not None:
-        entries = [e for e in entries if _target_matches(e.get("target"), target)]
+def _is_gated(entry: dict, target_gender: str | None,
+              target_number: str | None) -> bool:
+    """True when a GENERIC line is excluded by the v1.13 gender/number
+    gates. Target-specific lines are exempt — their authoring already
+    matched them to their subject (ro-08/ro-14/ro-32 are feminine
+    lines written for ندوش/كارما/لينا; ro-25 is plural for حادثة
+    القطار). A line tagged `gender: f` serves only a feminine-marked
+    request; a line tagged `number: p` only a plural-marked one.
+    None means unmarked -> masculine/singular default."""
+    if entry.get("target"):
+        return False
+    if entry.get("gender") == "f" and target_gender != "f":
+        return True
+    if entry.get("number") == "p" and target_number != "plural":
+        return True
+    return False
+
+
+def _pick_from(entries: list[dict], chat_id: int, category: str,
+               situation: str | None, user_id: int | None) -> str | None:
+    """One tier of the pick: situation preference, then the no-repeat
+    window. Returns a line, or None when the tier has no available
+    (non-window) line — the caller falls through to the next tier.
+    The LRU fallback lives in _pick (over the combined pool), not
+    here, so a windowed tier does not block the next tier."""
     if not entries:
         return None
     preferred = entries
@@ -331,15 +326,93 @@ def _pick(
         available = [e for e in generic if e["id"] not in recent]
     if not available:
         available = [e for e in entries if e["id"] not in recent]
-    if available:
-        entry = random.choice(available)
+    if not available:
+        return None
+    entry = random.choice(available)
+    _record_pick(chat_id, category, entry["id"], user_id)
+    return entry["line"]
+
+
+def _pick(
+    category: str,
+    chat_id: int,
+    member_safe_only: bool = True,
+    target: str | None = None,
+    situation: str | None = None,
+    user_id: int | None = None,
+    target_gender: str | None = None,
+    target_number: str | None = None,
+) -> str | None:
+    """Random line from a category, preferring lines tagged with
+    `situation` (v1.6 phase 2) and excluding the no-repeat window
+    (persisted last 25 per chat + last 10 per user + in-memory last 5).
+    member_safe_only=True (default) excludes lines tagged
+    `member_safe: false` — family-insult lines, served only when the
+    caller has established a resolved non-member target.
+    target (roast only): when given, only generic lines (no `target:`
+    field) and lines whose `target:` matches it are eligible; when no
+    line fits, the pool is the generic lines only — and if there are
+    no generic lines either, None (never a mismatched line). When
+    target is None (every other category) there is no filtering.
+    situation: when given and not "general", lines whose `situations:`
+    list contains it are preferred. When the situation has NO tagged
+    line in the eligible pool (e.g. cowardly — no roast line carries
+    it yet), the preference falls to `general`-tagged lines. When the
+    preferred lines are all inside the no-repeat window, the fallback
+    order is: `general` lines not in the window, then any line not in
+    the window, then — pool exhausted — the least-recently-used line
+    (deterministic, see _least_recently_used).
+    v1.13: (a) target-specific lines outrank generic ones — the pick
+    runs on the specific tier first and falls through to generic only
+    when the tier is empty or entirely inside the window; (b) the
+    gender/number gates (_is_gated) exclude generic feminine/plural
+    lines unless the request is marked so. Bare singular roast pool:
+    20 -> 16 lines (19 generic minus ro-12/ro-40 plural and ro-23
+    feminine). NOTE: an earlier draft of this change also gated
+    perv-only lines behind a perv-marked request — REMOVED before
+    shipping. The gender/number gates already fix the observed v1.11
+    defects (ro-23 for صلاح, plural lines for singular targets), and
+    the perv gate would have silenced lines Seif demonstrably likes
+    (ro-35 for صلاح in the v1.7 probe; ro-37/ro-38/ro-45 in the v1.9
+    probe — all bare roasts) and made ro-44 nearly unreachable. Seif
+    wants STRONG insults; perv lines are the strong ones."""
+    entries = load_bank().get(category) or []
+    if member_safe_only:
+        entries = [e for e in entries if e.get("member_safe", True) is not False]
+    if target is not None:
+        entries = [e for e in entries if _target_matches(e.get("target"), target)]
+    # v1.13: NO perv gate. An earlier draft gated perv-only lines
+    # behind a perv-marked request; it was removed before shipping —
+    # the gender/number gates fix the observed v1.11 defects, and the
+    # perv gate silenced lines Seif likes (ro-35, ro-37, ro-38, ro-45)
+    # and made ro-44 nearly unreachable. Target-specific perv lines
+    # (all four لينا lines, كارما's ro-14) stay reachable for their
+    # target regardless.
+    # v1.13 (c): gender/number gates, generic lines only.
+    entries = [e for e in entries
+               if not _is_gated(e, target_gender, target_number)]
+    if not entries:
+        return None
+    if target is not None:
+        # v1.13 (a): specific tier first, generic on exhaustion.
+        specific = [e for e in entries if e.get("target")]
+        generic = [e for e in entries if not e.get("target")]
+        line = _pick_from(specific, chat_id, category, situation, user_id)
+        if line is not None:
+            return line
+        line = _pick_from(generic, chat_id, category, situation, user_id)
+        if line is not None:
+            return line
     else:
-        # Whole eligible pool inside the window: rotate through the
-        # FULL pool (not just the preferred subset — a 1-line preferred
-        # pool would otherwise loop on that line forever).
-        entry = _least_recently_used(entries, chat_id, category)
-        if entry is None:
-            return None
+        line = _pick_from(entries, chat_id, category, situation, user_id)
+        if line is not None:
+            return line
+    # Whole eligible pool inside the window: rotate through the FULL
+    # pool (not just the preferred subset — a 1-line preferred pool
+    # would otherwise loop on that line forever).
+    entry = _least_recently_used(entries, chat_id, category)
+    if entry is None:
+        return None
     _record_pick(chat_id, category, entry["id"], user_id)
     return entry["line"]
 
@@ -402,6 +475,31 @@ def is_standalone_line(reply: str, line: str) -> bool:
     return norm_line in norm_reply and len(norm_reply) - len(norm_line) < 10
 
 
+def weave_about_target(reply: str, target: str | None,
+                       requester_names: set[str] | None) -> bool:
+    """True when a roast weave is about the requested target — or at
+    least not provably misdirected at the requester. Pure string
+    matching, no LLM call. (v1.13 coherence gate, Seif's rule.)
+    - target None, or not an Arabic word (bare @username) -> True
+      (cannot check; the pick-time filters already applied).
+    - target named in the reply (word-boundary, normalised) -> True.
+    - target absent AND a requester name named in the reply -> False
+      (misdirected: the reply is about the requester, not the target).
+    - neither named -> True (2nd-person address, cannot prove
+      misdirection)."""
+    if not target or not reply:
+        return True
+    norm_target = normalize_arabic(target)
+    if not re.search(r"[\u0600-\u06FF]", norm_target):
+        return True
+    if _has(normalize_arabic(reply), [norm_target]):
+        return True
+    for name in requester_names or set():
+        if name and _has(normalize_arabic(reply), [name]):
+            return False
+    return True
+
+
 def match_reply_bank_categorized(
     text: str,
     *,
@@ -458,6 +556,8 @@ def match_reply_bank_categorized(
                     member_safe_only=(target_is_member is not False),
                     target=roast_target,
                     situation=detect_roast_situation(text),
+                    target_gender=detect_roast_target_gender(text),
+                    target_number=detect_roast_target_number(text),
                     user_id=user_id,
                 )
                 if line is not None:

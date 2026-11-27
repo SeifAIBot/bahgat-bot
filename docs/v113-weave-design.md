@@ -1,6 +1,22 @@
 # v1.13 design — fixing the bank-line weave
 
 **Status:** design only. No code changed, nothing pushed, live bot untouched.
+
+**CORRECTION (2026-11-27, during implementation — the perv gate is REMOVED):**
+the design below gates perv-only lines behind a perv-marked request (§1.2,
+§2.2, §2.4, §6.1, the probe table). That gate was NOT shipped. The
+gender/number gates already fix the observed v1.11 defects (ro-23 feminine
+for صلاح, plural lines for singular targets), and the perv gate would have
+silenced lines Seif demonstrably likes (ro-35 for صلاح in the v1.7 probe;
+ro-37/ro-38/ro-45 in the v1.9 probe — all bare roasts) and made ro-44
+nearly unreachable (it is both perv-only AND plural, so it would need a
+perv-marked plural request). Seif wants STRONG insults; perv lines are the
+strong ones. The bare singular roast pool is therefore **20 → 16**, not
+20 → 10 (19 generic minus ro-12/ro-40 plural and ro-23 feminine). The
+probe-table rows that say "no perv line" are stale — a bare roast MAY draw
+a perv line; what it must not draw is a feminine/plural line for an
+unmarked target, or a line about someone else.
+
 **Problem (Seif, 2026-11-27 07:07–07:08 EET, live v1.11):** the bank line IS
 in the middle of the reply, but it has no relation to what comes before or
 after it. A disconnected paste is the worst option.

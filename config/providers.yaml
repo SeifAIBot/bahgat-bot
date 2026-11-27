@@ -144,11 +144,11 @@ providers:
 # not pass max_tokens (handlers pass 600, which overrides per call).
 caps:
   output_tokens:
-    groq: 1500
+    groq: 3000
     gemini: 4000
-    cerebras: 1500
-    nvidia: 1500
-    openrouter: 1500
+    cerebras: 3000
+    nvidia: 3000
+    openrouter: 3000
 
 routing:
   # Preference order within each tier; the router then reorders

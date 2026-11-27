@@ -283,25 +283,24 @@ async def test_llm_down_never_sends_verbatim_line(
     assert final not in {e["line"] for e in load_bank()["insulted"]}
 
 
-async def test_stubborn_model_returning_line_twice_gets_generic_fallback(
+async def test_stubborn_model_returning_line_twice_gets_line_verbatim(
         memory_fakes, settings, monkeypatch):
     router = _VerbatimRouter()
     ctx, bot, msg, user = _run_turn(
         monkeypatch, settings, "يا بهجت انت حمار", router, update_id=1005)
     await h._on_group_message_inner(make_update(msg, user, -100222, update_id=1005), ctx)
     # 1 call when the picked line carries its own angry markers (no
-    # voice regen; the standalone check replaces it locally), 2 when
-    # the voice-check regen fires first — either way the LLM turn ran
-    # and the line never goes out alone. The final reply is the point.
+    # voice regen; the standalone check passes it through locally), 2
+    # when the voice-check regen fires first — either way the LLM turn
+    # ran and the final reply is the point.
     assert len(router.calls) >= 1
     line = ingredient_of_call(router.calls[0])
     assert line is not None
     final = _final(msg)
-    # The standalone check replaces the line with a generic fallback
-    # (one of _INGREDIENT_FALLBACK_LINES) — never the bank line alone.
-    assert final in h._INGREDIENT_FALLBACK_LINES
-    assert final not in {e["line"] for e in load_bank()["insulted"]}
-    assert final != line
+    # v1.13 (Seif's rule): a draft that IS the line is no longer a
+    # violation — it IS the standalone fallback. The line goes out
+    # verbatim instead of a generic dismissal.
+    assert final == line
 
 
 # --- (b) pick-time filters still enforced -------------------------------------
@@ -401,3 +400,115 @@ def test_ingredient_block_carries_line_and_instruction():
     assert "في نص الرد" in block
     assert "ممنوع تبعت السطر ده لوحده" in block
     assert "افهم السطر ده كويس" in block
+
+
+# --- (e) coherence gate (v1.13) -----------------------------------------------
+# Seif's rule: a misdirected weave (line present but the reply is about
+# the requester, not the target) falls back to the line verbatim; a
+# coherent weave is sent as-is. The requester here is the owner
+# (first_name "سيف") so the gate's Arabic owner aliases apply.
+
+
+class _MisdirectedRouter:
+    """Weaves the picked line into a reply about the REQUESTER (Seif)
+    instead of the roast target — the live v1.11 failure."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def chat(self, messages, hard=False, temperature=None, max_tokens=None, **kw):
+        self.calls.append(messages)
+        line = ingredient_of_call(messages)
+        return (f"يا سيف، {line}، وانت اللي غلطان يا معفن.", "groq", 10)
+
+
+class _CoherentRouter:
+    """Weaves the picked line into a reply naming the target."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def chat(self, messages, hard=False, temperature=None, max_tokens=None, **kw):
+        self.calls.append(messages)
+        line = ingredient_of_call(messages)
+        return (f"يا تامر، {line}، وانت اللي غلطان.", "groq", 10)
+
+
+def _run_owner_turn(monkeypatch, settings, text, router, update_id):
+    ctx, bot, msg, user = _run_turn(
+        monkeypatch, settings, text, router, user_id=OWNER_ID,
+        update_id=update_id)
+    user.first_name = "سيف"
+    return ctx, bot, msg, user
+
+
+async def test_misdirected_weave_falls_back_to_line_verbatim(
+        memory_fakes, settings, monkeypatch):
+    router = _MisdirectedRouter()
+    ctx, bot, msg, user = _run_owner_turn(
+        monkeypatch, settings, "يا بهجت اشتم تامر", router, update_id=2001)
+    await h._on_group_message_inner(make_update(msg, user, -100222, update_id=2001), ctx)
+    line = ingredient_of_call(router.calls[0])
+    assert line is not None
+    final = _final(msg)
+    assert final == line
+
+
+async def test_coherent_weave_is_sent_as_is(
+        memory_fakes, settings, monkeypatch):
+    router = _CoherentRouter()
+    ctx, bot, msg, user = _run_owner_turn(
+        monkeypatch, settings, "يا بهجت اشتم تامر", router, update_id=2002)
+    await h._on_group_message_inner(make_update(msg, user, -100222, update_id=2002), ctx)
+    line = ingredient_of_call(router.calls[0])
+    assert line is not None
+    final = _final(msg)
+    assert "تامر" in final and line in final
+    assert final != line
+
+
+# --- (f) opener variety + deep questions (v1.13) -------------------------------
+
+
+class _RepeatingOpenerRouter:
+    """First draft opens with the same vocative as the previous reply;
+    second draft opens differently."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def chat(self, messages, hard=False, temperature=None, max_tokens=None, **kw):
+        self.calls.append(messages)
+        if len(self.calls) == 1:
+            return ("يا حمار يا سيف، البشاميل دي حاجة عظيمة.", "groq", 10)
+        return ("اسمع بس، البشاميل دي أحسن حاجة في الدنيا.", "groq", 10)
+
+
+async def test_repeating_opener_regenerates_once(
+        memory_fakes, settings, monkeypatch):
+    monkeypatch.setattr(
+        h, "recent_messages",
+        lambda chat_id, limit=8: [
+            {"role": "assistant", "content": "يا حمار يا سيف، انت غبي."}])
+    router = _RepeatingOpenerRouter()
+    ctx, bot, msg, user = _run_turn(
+        monkeypatch, settings, "يا بهجت ايه رأيك في المكرونة بالبشاميل؟",
+        router, update_id=2003)
+    await h._on_group_message_inner(make_update(msg, user, -100222, update_id=2003), ctx)
+    assert len(router.calls) == 2
+    assert "ابدأ الرد ده بشكل مختلف" in router.calls[1][-1]["content"]
+    final = _final(msg)
+    assert final == "اسمع بس، البشاميل دي أحسن حاجة في الدنيا."
+
+
+async def test_deep_question_gets_answer_first_note(
+        memory_fakes, settings, monkeypatch):
+    router = ScriptedRouter(["مبسوط؟ أنا مبسوط يا عم، حياتي زي الفل."])
+    ctx, bot, msg, user = _run_turn(
+        monkeypatch, settings,
+        "يا بهجت انت حاسس إنك مبسوط في حياتك ولا ناقصك حاجة؟",
+        router, update_id=2004)
+    await h._on_group_message_inner(make_update(msg, user, -100222, update_id=2004), ctx)
+    assert any(m.get("content") == h._DEEP_NOTE for m in router.calls[0])
+    final = _final(msg)
+    assert "مبسوط" in final

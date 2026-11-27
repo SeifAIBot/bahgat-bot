@@ -151,14 +151,16 @@ def test_user_roast_lines_generic_and_tagged():
                   if e.get("confidence") == "user"]
     assert len(user_roast) == 10
     # Generic (no target:) so they fit any roast target — except ro-43,
-    # the subject-targeted ميدو line (v1.6 phase 1, round 3).
+    # the subject-targeted ميدو line (v1.6 phase 1, round 3), and ro-39,
+    # the Cristiano line (v1.13: the joke is about كريستيانو).
     assert all(e.get("target") is None for e in user_roast
-               if e["id"] != "ro-43")
+               if e["id"] not in ("ro-43", "ro-39"))
     by_id = {e["id"]: e for e in user_roast}
     assert by_id["ro-40"]["line"] == FAMILY_LINE
     assert by_id["ro-40"]["member_safe"] is False
     assert by_id["ro-43"]["target"] == "ميدو"
     assert by_id["ro-43"]["member_safe"] is True
+    assert by_id["ro-39"]["target"] == "كريستيانو"
     for rid in ("ro-37", "ro-38", "ro-39"):
         assert by_id[rid]["member_safe"] is True
     # Round-3 family lines are non-member-only; the other round-3 roasts
@@ -183,11 +185,13 @@ def test_family_user_line_never_served_to_members(monkeypatch):
         "يا بهجت اشتم محمد", chat_id=CHAT_ID,
         target_is_member=None) != FAMILY_LINE
     # Non-member reachability: sample many draws; the family line
-    # must appear (it is in the non-member pool).
+    # must appear (it is in the non-member pool). v1.13: ro-40 is a
+    # plural-addressed line ("يا ولاد..."), so the draws use the plural
+    # imperative — a bare singular roast correctly never draws it.
     monkeypatch.undo()
     seen = {
         match_reply_bank(
-            "يا بهجت اشتم محمد", chat_id=CHAT_ID,
+            "يا بهجت اشتموا محمد", chat_id=CHAT_ID,
             target_is_member=False)
         for _ in range(200)
     }
@@ -197,7 +201,7 @@ def test_family_user_line_never_served_to_members(monkeypatch):
 def test_user_roast_lines_reachable_for_any_target():
     generic = {e["line"] for e in load_bank()["roast"]
                if e.get("target") is None}
-    assert len(generic) == 20
+    assert len(generic) == 19  # v1.13: ro-39 targets كريستيانو
     for text in ("اشتم صلاح", "يا بهجت اشتم صلاح"):
         seen = {
             match_reply_bank(text, chat_id=CHAT_ID, target_is_member=False)

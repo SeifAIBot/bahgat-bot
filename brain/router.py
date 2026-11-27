@@ -805,22 +805,66 @@ class BrainRouter:
                       "max_completion_tokens": mct, "reasoning_effort": "low"}
             if family == "groq":
                 kwargs["include_reasoning"] = False
+            if not hard:
+                # v1.13: repetition penalties for chat turns only.
+                # Search turns keep factual consistency (temperature
+                # 0.25, no penalties). Positive values penalise token
+                # reuse within one generation; cross-turn repetition is
+                # handled by the handler's opener check, not here.
+                kwargs["frequency_penalty"] = 0.5
+                kwargs["presence_penalty"] = 0.3
             self._last_call[name] = time.monotonic()
+            best_text = ""
+            best_tout = 0
+            length_retried = False
             for attempt in range(attempts):
                 t0 = time.monotonic()
                 try:
                     resp = await client.chat.completions.create(**kwargs)
                     text = resp.choices[0].message.content or ""
                     finish = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
-                    if finish == "length":
-                        logger.warning("reply truncated by length, provider=%s entry=%s", family, name)
-                    if not text.strip():
-                        raise RuntimeError("empty reply from model")
                     usage = getattr(resp, "usage", None)
                     tin = getattr(usage, "prompt_tokens", 0) or est_in
                     tout = getattr(usage, "completion_tokens", 0) or self.estimate_tokens(text)
                     reasoning = _reasoning_tokens(usage)
                     cached = _cached_tokens(usage)
+                    if finish == "length":
+                        # v1.13: a length-truncated draft must NEVER be
+                        # sent as-is (live 2026-11-27: replies cut off
+                        # mid-word, one consisting of only the opener).
+                        # Reasoning tokens count against
+                        # max_completion_tokens, so a reasoning-heavy
+                        # turn can eat the whole budget before the
+                        # visible reply starts. Retry once with a
+                        # doubled cap; if that also truncates, return
+                        # the longest draft we have.
+                        logger.warning("reply truncated by length, provider=%s entry=%s", family, name)
+                        if len(text) > len(best_text):
+                            best_text, best_tout = text, tout
+                        if family == "groq":
+                            new_mct = min(mct * 2, max(mct, 7500 - est_in))
+                        else:
+                            new_mct = min(mct * 2, 6000)
+                        if not length_retried and new_mct > mct:
+                            length_retried = True
+                            mct = new_mct
+                            kwargs["max_completion_tokens"] = mct
+                            continue
+                        self._record_usage(name, tin, tout, model=model)
+                        breaker.record_success()
+                        self._record_reply_tokens(intent or "chat", tin + tout)
+                        logger.info(json.dumps({
+                            "provider": family, "entry": name, "model": model,
+                            "latency_ms": int((time.monotonic() - t0) * 1000),
+                            "tokens_in": tin, "tokens_out": tout,
+                            "reasoning_tokens": reasoning, "cached_tokens": cached,
+                            "finish_reason": finish,
+                            "retries": attempt, "status": "ok",
+                            "truncated": True,
+                        }, ensure_ascii=False))
+                        return (best_text, family, best_tout)
+                    if not text.strip():
+                        raise RuntimeError("empty reply from model")
                     self._record_usage(name, tin, tout, model=model)
                     breaker.record_success()
                     # EWMA input: exactly once per successful reply.
