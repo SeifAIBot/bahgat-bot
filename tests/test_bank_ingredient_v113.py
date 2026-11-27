@@ -208,15 +208,21 @@ def test_weave_about_target(reply, target, requester, expected):
 # --- (c) the prompt block ---------------------------------------------------
 
 
-def test_prompt_version_is_7_0():
-    assert PROMPT_VERSION == "7.0"  # v1.14: facts atomised out of SYSTEM_BASE
+def test_prompt_version_is_7_1():
+    assert PROMPT_VERSION == "7.1"  # v1.15: roast context + softened refusal
 
 
 def test_bank_ingredient_block_roast_names_target_and_requester():
     block = bank_ingredient_block(
         "كنت بموت في عنيك", target="تامر", requester="سيف", kind="roast")
     assert "تامر" in block and "سيف" in block
-    assert "ممنوع ترفض تشتم تامر" in block
+    # v1.15: the "never refuse" absolute is softened to a specific
+    # positive instruction + one line of true context (light teasing
+    # between friends; never religion/family/looks/hate).
+    assert "لو الطلب هزار خفيف، اشتم تامر" in block
+    assert "هزار خفيف بين صحاب" in block
+    assert "مش عن الدين ولا العيلة" in block
+    assert "ممنوع ترفض تشتم تامر" not in block
     assert "متشتموش هو" in block
     assert "من غير علامات تنسيق" in block
 

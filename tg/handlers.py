@@ -97,10 +97,13 @@ from brain import intent as _intent_mod
 from brain import memory as _memory
 from brain import mood as _mood_mod
 from brain import prompt as _prompt_mod
+from brain import telemetry as _telemetry
 from brain.intent import detect_fast_reply, detect_insult_situation, detect_intent, detect_prefix_mode, looks_like_deep_question, looks_like_insult, looks_like_insult_turn, looks_like_opinion_ask, looks_stalling, looks_unknown
 from brain.reply_bank import (
     INGREDIENT_CATEGORIES,
+    RefusalOutcome,
     ingredient_in_reply,
+    is_refusal_or_deflection,
     is_standalone_line,
     looks_like_challenge,
     match_reply_bank_categorized,
@@ -156,6 +159,15 @@ _WAIT_REPLY = "استنى ثانية"
 #   would not answer from them (stalled twice) — answer extractively.
 _SEARCH_EMPTY = "دورت وملقتش حاجة تفيد. جرب تصيغ السؤال بشكل تاني؟"
 _TURN_ERROR = "يا عم، حصلت مشكلة تقنية، جرب تاني."
+# v1.15 latency bounds (research report §2.2 Rank 1): a turn gets at
+# most 60 s wall clock and at most 2 router.chat() calls (main + one
+# fallback/containment). When either is spent, the turn answers with
+# the picked bank line (ingredient turns) or the short canned error
+# line — never waits, never hangs. The 60 s deadline is the latency
+# bound, NOT a token cap: output_tokens stay at 3000 (the v1.13
+# truncation fix) — a small cap would reintroduce truncation.
+_TURN_DEADLINE_SECONDS = 60
+_MAX_LLM_CALLS_PER_TURN = 2
 _FIRM_SEARCH_NOTE = (
     "جاوب دلوقتي من نتائج البحث اللي فوق — متقولش إنك لسه بتدور ولا إنك "
     "مش عارف، ولو النتائج مش مغطية السؤال قول 'دورت ومفيش حاجة'."
@@ -862,16 +874,51 @@ def _check_reply_guarded(reply: str, insult_level: str, owner_id: int,
 
 
 async def _router_chat(router, messages, hard: bool, temperature: float,
-                       cheap_only: bool = False, intent: str | None = None):
+                       cheap_only: bool = False, intent: str | None = None,
+                       budget=None, turn_id=None, step=None,
+                       exclude_providers=None):
     """router.chat with max_tokens cap (600); cheap_only restricts the
     plan to the cheap tiers (degraded mode) and intent feeds the
     router's per-reply EWMA recording. Falls back to the v0.4/v0.6
-    signature for routers that do not accept the new kwargs."""
+    signature for routers that do not accept the new kwargs.
+    v1.15: budget caps the turn at _MAX_LLM_CALLS_PER_TURN calls — a
+    spent budget returns ("", None, 0) without calling the router, so
+    retry sites keep the prior draft instead of firing another call.
+    turn_id/step tag the telemetry rows; exclude_providers skips
+    families (the roast retry goes to the OTHER provider, never the
+    same model)."""
+    if budget is not None and not budget.consume():
+        return ("", None, 0)
     try:
         return await router.chat(messages, hard=hard, temperature=temperature,
-                                 max_tokens=600, cheap_only=cheap_only, intent=intent)
+                                 max_tokens=600, cheap_only=cheap_only, intent=intent,
+                                 turn_id=turn_id, step=step,
+                                 exclude_providers=exclude_providers)
     except TypeError:
-        return await router.chat(messages, hard=hard, temperature=temperature, max_tokens=600)
+        # Routers with the v0.7 surface (cheap_only/intent, no
+        # telemetry kwargs): keep cheap_only/intent, drop the rest.
+        try:
+            return await router.chat(messages, hard=hard, temperature=temperature,
+                                     max_tokens=600, cheap_only=cheap_only, intent=intent)
+        except TypeError:
+            return await router.chat(messages, hard=hard, temperature=temperature, max_tokens=600)
+
+
+class _TurnBudget:
+    """Counts router.chat() calls in one turn (v1.15). One per turn,
+    created by _run_llm_turn_bounded with _MAX_LLM_CALLS_PER_TURN;
+    _router_chat consumes one per call."""
+
+    def __init__(self, max_calls: int):
+        self.remaining = max_calls
+        self.consumed = 0
+
+    def consume(self) -> bool:
+        if self.remaining <= 0:
+            return False
+        self.remaining -= 1
+        self.consumed += 1
+        return True
 
 
 # --- small helpers ----------------------------------------------------------
@@ -1910,6 +1957,35 @@ async def on_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text("\n".join(lines[:20]))
 
 
+async def on_diag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """v1.15 owner-only /diag: the last 10 slow turns + per-provider
+    p50/p95 from the telemetry tables (research report §2.3).
+    Non-owners get nothing (same rule as /stats)."""
+    msg = update.effective_message
+    user = update.effective_user
+    settings = context.application.bot_data.get("settings")
+    if msg is None or user is None or settings is None:
+        return
+    if not is_owner(user.id, settings.owner_id):
+        return
+    lines = ["تشخيص (آخر 10 أدوار بطيئة):"]
+    slow = _telemetry.recent_slow_turns(limit=10)
+    if not slow:
+        lines.append("مفيش أدوار بطيئة مسجلة.")
+    for t in slow:
+        lines.append(
+            f"- {t['turn_id']} {t.get('kind') or '?'}: "
+            f"{int(t['total_ms'])}ms، {t['calls']} مكالمات، {t['outcome']}")
+    stats = _telemetry.provider_latency_stats()
+    if stats:
+        lines.append("المزودين (p50/p95):")
+        for s in stats:
+            lines.append(
+                f"- {s['provider']}: {s['calls']} مكالمات، "
+                f"p50={s['p50_ms']}ms، p95={s['p95_ms']}ms")
+    await msg.reply_text("\n".join(lines[:20]))
+
+
 # --- my_chat_member ---------------------------------------------------------
 
 async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2054,7 +2130,7 @@ async def _on_group_message_inner(update: Update, context: ContextTypes.DEFAULT_
         return
     async with lock:
         try:
-            await _run_llm_turn(update, context, msg, user, chat_id, text, settings, router)
+            await _run_llm_turn_bounded(update, context, msg, user, chat_id, text, settings, router)
         finally:
             _last_reply_time[key] = time.time()
             if len(_last_reply_time) > 1000:  # bounded; prune stale entries
@@ -2078,12 +2154,25 @@ def _looks_like_owner_command(text: str) -> bool:
     return False
 
 
-async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, router):
+async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, router,
+                        turn_id=None, budget=None, turn_ctx=None):
+    # v1.15: turn_id (one per turn, shared by every LLM call),
+    # budget (max 2 router.chat() calls per turn) and turn_ctx (a
+    # mutable holder the bounded wrapper reads: kind, bank_line,
+    # reply_preview, replied, outcome) come from
+    # _run_llm_turn_bounded; direct callers get fresh defaults.
+    if turn_id is None:
+        turn_id = _telemetry.new_turn_id()
+    if budget is None:
+        budget = _TurnBudget(_MAX_LLM_CALLS_PER_TURN)
+    if turn_ctx is None:
+        turn_ctx = {}
     # --- v0.6: exact-match cache BEFORE quota (cache hits are free) -------
     # Pure-text signals + a member read first; nothing is saved or consumed
     # yet. A cache hit returns here: no quota consumed, no router call, but
     # mood + history are still updated so the conversation stays coherent.
     intent_early = detect_intent(text)
+    turn_ctx["kind"] = intent_early
     # v1.0 prefix layer (Seif's design): detect_prefix_mode returns the
     # mode + the remainder after the prefix word. detect_intent already
     # applies the prefix; the remainder is needed here as the query
@@ -2187,6 +2276,9 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 # to the LLM turn with the line stashed.
                 _bank_ingredient = bank
                 _bank_kind = _bank_category
+                # v1.15: the bounded wrapper sends this line verbatim
+                # if the turn deadline fires.
+                turn_ctx["bank_line"] = bank
                 # v1.13: the weave needs the target — the resolved name
                 # when the roast was resolved, else the raw extraction.
                 # Insulted comebacks are about the sender by
@@ -2227,6 +2319,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                     await _send_text(msg, bank + _VOICE_COOLDOWN_NOTE)
                 else:
                     await _send_text(msg, bank)
+                turn_ctx["reply_preview"] = bank[:80]
                 return
     # v1.11: an ingredient turn must REACH the LLM — the fast path and
     # the exact-match cache would answer without the line, and a cached
@@ -2255,6 +2348,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 mood_early, user.id, chat_id,
             )
             await _send_text(msg, fast)
+            turn_ctx["reply_preview"] = fast[:80]
             return
     if cache_eligible:
         cached = _get_cached_reply(norm_early, intent_early, bucket_early)
@@ -2275,6 +2369,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 intent_early, mood_early, user.id, chat_id,
             )
             await _send_text(msg, reply)
+            turn_ctx["reply_preview"] = reply[:80]
             return
 
     # v0.7: capacity is computed ONCE per turn (router pool snapshot)
@@ -2478,6 +2573,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         reply, provider, _tokens = await _router_chat(
             router, messages, hard=hard, temperature=temperature_for(intent),
             cheap_only=cheap_only, intent=intent,
+            budget=budget, turn_id=turn_id, step="main",
         )
 
         # Search endgame (v0.9): a search question must end with an ANSWER
@@ -2528,6 +2624,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 reply2, provider2, _t2 = await _router_chat(
                     router, messages2, hard=True, temperature=0.25,
                     cheap_only=cheap_only, intent=intent,
+                    budget=budget, turn_id=turn_id, step="search_retry",
                 )
                 if reply2.strip() and not (looks_unknown(reply2) or looks_stalling(reply2)):
                     reply, provider = reply2, provider2
@@ -2560,6 +2657,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 reply2, provider2, _t2 = await _router_chat(
                     router, messages2, hard=True, temperature=0.25,
                     cheap_only=cheap_only, intent=intent,
+                    budget=budget, turn_id=turn_id, step="search_retry",
                 )
                 if reply2.strip() and not (looks_unknown(reply2) or looks_stalling(reply2)):
                     reply, provider = reply2, provider2
@@ -2572,6 +2670,73 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 reply = _search_failure_line()
                 reply_is_fallback = True
 
+        # v1.15 roast refusal (research report §1.2 Rank 1): a roast
+        # draft that refuses, deflects, or drops the bank line gets
+        # ONE retry on the OTHER provider with the same prompt — never
+        # the same model — and if that also fails (or the call budget
+        # is spent) the picked bank line goes out verbatim. The
+        # detector is deterministic code (structured signal first,
+        # then the canned deflection, generic markers, containment);
+        # no second LLM judge. Roast path only — insulted comebacks
+        # keep the v1.13 flow. The no-repeat window already rotated
+        # the pick at turn start, so the verbatim line does not
+        # repeat within a session.
+        if _bank_ingredient is not None and _bank_kind == "roast" \
+                and not reply_is_fallback:
+            _meta = getattr(router, "last_call_meta", None) or {}
+            if provider == "none":
+                # All providers failed — no draft to check. The bank
+                # line still goes out verbatim. (The failed attempts
+                # already carry their own outcomes in llm_calls —
+                # "blocked_400" when the last attempt answered 400 —
+                # so nothing is regraded here.)
+                reply = _bank_ingredient
+                turn_ctx["outcome"] = "bank_sent"
+                turn_ctx["reply_preview"] = reply[:80]
+                logger.warning(
+                    "roast providers down; bank fallback sent verbatim "
+                    "user_id=%s chat_id=%s", user.id, chat_id)
+            else:
+                _refusal = is_refusal_or_deflection(
+                    reply, _bank_ingredient,
+                    structured_refusal=bool(_meta.get("refusal")),
+                    finish_reason=_meta.get("finish_reason"))
+                if _refusal is not RefusalOutcome.OK:
+                    logger.warning(
+                        "roast refusal outcome=%s provider=%s "
+                        "user_id=%s chat_id=%s",
+                        _refusal.value, provider, user.id, chat_id)
+                    _telemetry.update_call_outcome(
+                        turn_id, "main", _refusal.value)
+                    _rescued = False
+                    _retry_reply, _retry_provider, _rt = await _router_chat(
+                        router, messages, hard=hard,
+                        temperature=temperature_for(intent),
+                        cheap_only=cheap_only, intent=intent,
+                        budget=budget, turn_id=turn_id, step="roast_retry",
+                        exclude_providers={provider})
+                    if _retry_reply.strip():
+                        _retry_meta = getattr(
+                            router, "last_call_meta", None) or {}
+                        _retry_outcome = is_refusal_or_deflection(
+                            _retry_reply, _bank_ingredient,
+                            structured_refusal=bool(_retry_meta.get("refusal")),
+                            finish_reason=_retry_meta.get("finish_reason"))
+                        if _retry_outcome is RefusalOutcome.OK:
+                            reply, provider = _retry_reply, _retry_provider
+                            _rescued = True
+                            _telemetry.update_call_outcome(
+                                turn_id, "roast_retry", "fallback_rescued")
+                            turn_ctx["outcome"] = "fallback_rescued"
+                    if not _rescued:
+                        reply = _bank_ingredient
+                        turn_ctx["outcome"] = "bank_sent"
+                        turn_ctx["reply_preview"] = reply[:80]
+                        logger.warning(
+                            "roast refusal unrescued; bank fallback sent "
+                            "verbatim user_id=%s chat_id=%s",
+                            user.id, chat_id)
+
         # v1.1 voice check (research method #4): a just_chat/voice reply
         # that comes out polite, Fusha, apologetic, or restating the
         # topic instead of taking a stance gets ONE regeneration with a
@@ -2583,10 +2748,16 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         # so a restatement opener there is not a persona failure.
         # v1.3: provoked turns (insult at the bot, roast request, or
         # challenge) also flag an edgeless reply via voice_check.
+        # v1.15: skipped for ingredient turns — the ingredient retry
+        # below is the turn's ONE fallback/containment call under the
+        # 2-call budget, and the voice regen would consume it and
+        # starve the containment retry (the same reason the opener
+        # regen already skips ingredient turns).
         if (
             intent in ("just_chat", "voice")
             and not reply_is_fallback
             and not search_ran
+            and _bank_ingredient is None
             and not re.search(r"\[\d+\]", reply)
         ):
             _flags = voice_check(
@@ -2609,6 +2780,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                     router, _regen_messages, hard=False,
                     temperature=temperature_for(intent),
                     cheap_only=cheap_only, intent=intent,
+                    budget=budget, turn_id=turn_id, step="voice_regen",
                 )
                 if reply2.strip():
                     reply, provider = reply2, provider2
@@ -2651,6 +2823,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                     router, _ing_messages, hard=False,
                     temperature=temperature_for(intent),
                     cheap_only=cheap_only, intent=intent,
+                    budget=budget, turn_id=turn_id, step="ingredient_retry",
                 )
                 if reply2.strip():
                     reply, provider = reply2, provider2
@@ -2698,6 +2871,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                     router, _vary_messages, hard=False,
                     temperature=temperature_for(intent),
                     cheap_only=cheap_only, intent=intent,
+                    budget=budget, turn_id=turn_id, step="opener_regen",
                 )
                 if reply2.strip():
                     reply, provider = reply2, provider2
@@ -2707,6 +2881,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             persona_selection=_persona_selection)
         if not reply.strip():
             reply = "يا عم، الكلام ده مش داخل دماغي، قول حاجة عدلة."
+        turn_ctx["reply_preview"] = reply[:80]
         add_message(chat_id, context.bot.id, "assistant", reply)
         # v0.6: store fresh just_chat replies for later exact-match hits.
         # Exclusions (never cache): search/youtube/voice intents, insulted
@@ -2758,9 +2933,17 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 elif time.time() - _last_voice.get(voice_key, 0) < _VOICE_COOLDOWN:
                     send_text = reply + _VOICE_COOLDOWN_NOTE
             await _send_final(msg, status, send_text)
+            turn_ctx["replied"] = True
         if not voice_only and use_voice:
             if await _try_send_voice(msg, context, chat_id, reply):
                 _last_voice[voice_key] = time.time()
+    except TimeoutError:
+        # v1.15: the 60 s turn deadline fired — re-raise so the
+        # bounded wrapper sends the bank line / canned reply and
+        # records the timeout. The generic handler below must NOT
+        # swallow it (it would send _TURN_ERROR and hide the timeout
+        # from the wrapper, which also owns the owner DM).
+        raise
     except RetryAfter:
         # Rate limit: never send a fallback message (it would 429 too).
         raise
@@ -2784,6 +2967,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                     raise
                 except Exception:
                     pass
+        turn_ctx["replied"] = True
     finally:
         stop_typing.set()
         typing_task.cancel()
@@ -2791,6 +2975,87 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             await typing_task
         except asyncio.CancelledError:
             pass
+
+
+async def _maybe_owner_dm(context, settings, turn_id, kind, total_ms, outcome):
+    """v1.15: DM the owner (never the group) when a turn was slow
+    (>60 s), hit a 429/timeout, or refused — one line: turn id, kind,
+    calls, total, per-step timings, outcome. Metadata only — no
+    prompts, no completions, no user text. Never raises."""
+    try:
+        if settings is None:
+            return
+        calls = _telemetry.calls_for_turn(turn_id)
+        bad = [c for c in calls
+               if c.get("outcome") in (
+                   "refused_structured", "refused_text",
+                   "refused_canned", "missing_line", "blocked_400")
+               or c.get("error_kind") in (
+                   "rate_limit", "timeout", "cancelled")]
+        if (total_ms <= _TURN_DEADLINE_SECONDS * 1000 and not bad
+                and outcome not in ("timeout", "error", "bank_sent")):
+            return
+        steps: dict[str, list[int]] = {}
+        for c in calls:
+            steps.setdefault(c.get("step") or "?", []).append(
+                int(c.get("total_ms") or 0))
+        step_txt = ",".join(
+            f"{s}:{sum(v)}ms" for s, v in steps.items()) or "-"
+        text = (
+            f"diag {turn_id} kind={kind or '?'} calls={len(calls)} "
+            f"total={int(total_ms)}ms steps={step_txt} outcome={outcome}"
+        )
+        await context.bot.send_message(chat_id=settings.owner_id, text=text)
+    except Exception:
+        logger.warning("owner diag DM failed", exc_info=True)
+
+
+async def _run_llm_turn_bounded(update, context, msg, user, chat_id, text, settings, router):
+    """v1.15: one turn, bounded — 60 s wall clock, max 2 LLM calls
+    (see _TurnBudget). Records the turns row and DMs the owner on
+    slow/failed turns. On deadline: the picked bank line verbatim
+    (ingredient turns) or the short canned error line — never
+    silence, never a hang."""
+    turn_id = _telemetry.new_turn_id()
+    budget = _TurnBudget(_MAX_LLM_CALLS_PER_TURN)
+    turn_ctx: dict = {}
+    t0 = time.perf_counter()
+    outcome = "ok"
+    try:
+        async with asyncio.timeout(_TURN_DEADLINE_SECONDS):
+            await _run_llm_turn(update, context, msg, user, chat_id, text,
+                                settings, router, turn_id=turn_id,
+                                budget=budget, turn_ctx=turn_ctx)
+    except TimeoutError:
+        outcome = "timeout"
+        if not turn_ctx.get("replied"):
+            line = turn_ctx.get("bank_line")
+            try:
+                await _send_text(msg, line if line else _TURN_ERROR)
+            except Exception:
+                pass
+            turn_ctx["replied"] = True
+    except asyncio.CancelledError:
+        outcome = "cancelled"
+        raise
+    except RetryAfter:
+        outcome = "rate_limited"
+        raise
+    except Exception:
+        outcome = "error"
+        raise
+    finally:
+        if outcome == "ok":
+            # The turn itself may have ended on the bank fallback or
+            # a rescue; a timeout/error above keeps its own outcome.
+            outcome = turn_ctx.get("outcome", "ok")
+        total_ms = (time.perf_counter() - t0) * 1000
+        _telemetry.record_turn(
+            turn_id, chat_id, user.id, turn_ctx.get("kind") or "unknown",
+            total_ms, budget.consumed, outcome,
+            turn_ctx.get("reply_preview") or "")
+        await _maybe_owner_dm(context, settings, turn_id,
+                              turn_ctx.get("kind"), total_ms, outcome)
 
 
 # --- YouTube callback --------------------------------------------------------
@@ -3042,10 +3307,12 @@ def register_handlers(app: Application, settings):
     app.bot_data["settings"] = settings
     app.bot_data["router"] = BrainRouter(settings)
     app.bot_data.setdefault("yt_requests", {})
+    _telemetry.init_telemetry()
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS, on_group_message))
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, on_group_message))
     app.add_handler(CallbackQueryHandler(on_callback, pattern=r"^yt:(video|audio)$"))
     app.add_handler(CallbackQueryHandler(on_yt_pick, pattern=r"^yt:pick:\d+$"))
     app.add_handler(CommandHandler("stats", on_stats))
+    app.add_handler(CommandHandler("diag", on_diag))
     app.add_handler(CommandHandler("reload", on_reload_command))
     app.add_handler(ChatMemberHandler(on_my_chat_member, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))

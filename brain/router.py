@@ -60,10 +60,12 @@ import re
 import sqlite3
 import time
 import logging
+import httpx
 import yaml
 from pathlib import Path
 from openai import AsyncOpenAI
 
+from brain import telemetry as _telemetry
 from core.config import data_dir
 
 logger = logging.getLogger("bahgat")
@@ -108,6 +110,20 @@ PROVIDER_ENDPOINTS = {
 TRANSIENT = (408, 429, 500, 502, 503, 504)
 # Auth / not-found / retired-model: disable the entry, never retry it.
 _DISABLE_STATUS = (401, 403, 404)
+# v1.15 latency bounds (research report §2.2 Rank 1): ONE explicit
+# client timeout for every provider call — connect 5 s, read 25 s
+# (the per-call bound), write 10 s, pool 5 s — AND max_retries=0 on
+# the SDK client. The SDK's default is a 600 s timeout with 2
+# retries, which multiplied the router's own retry loop (up to 2
+# attempts per entry x N entries) into the 172-428 s turns seen live.
+# The retry layer is the router's own loop (max_retries_per_provider
+# in YAML, default 1) — exactly ONE layer retries, the SDK never
+# does. config/providers.yaml timeout_seconds (20/30) is now unused
+# (kept in the YAML for compat); this explicit timeout governs.
+_CLIENT_TIMEOUT = httpx.Timeout(connect=5.0, read=25.0, write=10.0, pool=5.0)
+# finish_reason values that mean the provider refused the content
+# (OpenAI "content_filter"; Gemini via OpenAI-compat "SAFETY").
+_REFUSAL_FINISH_REASONS = frozenset({"content_filter", "SAFETY"})
 _DAILY_WORDS = ("daily", "quota", "tpd", "tokens per day", "per day")
 _OPENROUTER_REFERER = "https://t.me/Bahgoti_bot"
 _OPENROUTER_TITLE = "Bahgat Bot"
@@ -214,6 +230,63 @@ def _cached_tokens(usage) -> int:
         return 0
 
 
+def _refusal_signal(resp):
+    """(refused, finish_reason) from a completions response (v1.15):
+    OpenAI SDK exposes a refusal as choice.message.refusal; Gemini
+    via the OpenAI-compatible endpoint reports finish_reason SAFETY
+    (OpenAI: content_filter). Either one is a structured refusal —
+    the model did not produce a usable reply."""
+    try:
+        choices = getattr(resp, "choices", None) or []
+        choice = choices[0] if choices else None
+    except Exception:
+        return False, None
+    if choice is None:
+        return False, None
+    finish = getattr(choice, "finish_reason", None)
+    msg = getattr(choice, "message", None)
+    refusal = getattr(msg, "refusal", None) if msg is not None else None
+    if refusal is not None:
+        return True, finish
+    if finish in _REFUSAL_FINISH_REASONS:
+        return True, finish
+    return False, finish
+
+
+def _error_kind(exc, status):
+    """Short error class for the telemetry row (never the raw text)."""
+    if status == 429:
+        return "rate_limit"
+    if status == 400:
+        return "http_400"
+    if type(exc).__name__ in ("APITimeoutError",) or isinstance(
+            exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+        return "timeout"
+    if status is not None:
+        return "http"
+    return "api"
+
+
+def _record_attempt(turn_id, step, provider, model, total_ms, *,
+                    status="ok", http_status=None, finish_reason=None,
+                    tokens_in=None, tokens_out=None, retry_after=None,
+                    temperature=None, error_kind=None, outcome="ok"):
+    """One telemetry row per provider attempt (v1.15). Never raises —
+    telemetry must never break a turn. TTFT equals total: these calls
+    are not streamed, so there is no first token to time separately."""
+    try:
+        from brain.prompt import PROMPT_VERSION
+    except Exception:
+        PROMPT_VERSION = ""
+    _telemetry.record_llm_call(
+        turn_id, step, provider, model, total_ms,
+        status=status, http_status=http_status,
+        finish_reason=finish_reason, tokens_in=tokens_in,
+        tokens_out=tokens_out, retry_after=retry_after,
+        prompt_version=PROMPT_VERSION, temperature=temperature,
+        error_kind=error_kind, outcome=outcome)
+
+
 class CircuitBreaker:
     def __init__(self, threshold=3, open_seconds=60):
         self.threshold, self.open_seconds = threshold, open_seconds
@@ -252,6 +325,10 @@ class BrainRouter:
         self._disabled = set()
         # Last call start (time.monotonic) per entry, for rpm guards.
         self._last_call = {}
+        # v1.15: structured signal of the latest attempt (provider /
+        # model / finish_reason / refusal / http_status) for the
+        # handler's roast-refusal check; {} before any attempt.
+        self.last_call_meta = {}
         enabled = [e["name"] for e in self.entries if self.keys.get(e.get("family"))]
         missing = [e["name"] for e in self.entries if not self.keys.get(e.get("family"))]
         logger.info("router v6 providers enabled=%s disabled(no key)=%s",
@@ -323,9 +400,15 @@ class BrainRouter:
             headers = {"HTTP-Referer": _OPENROUTER_REFERER, "X-Title": _OPENROUTER_TITLE}
         cfg = self._provider_cfg(name)
         base_url = cfg.get("base_url") or PROVIDER_ENDPOINTS.get(family)
-        timeout = cfg.get("timeout_seconds", 30)
+        # v1.15: explicit httpx timeout (connect 5 / read 25 / write 10 /
+        # pool 5) + max_retries=0 on the SDK client. The SDK default
+        # (600 s timeout, 2 retries) multiplied the router's own retry
+        # loop into 172-428 s turns; the router's own loop
+        # (max_retries_per_provider in YAML) is the single retry layer.
+        # config/providers.yaml timeout_seconds is now unused.
         c = AsyncOpenAI(api_key=self.keys[family], base_url=base_url,
-                        timeout=timeout, default_headers=headers)
+                        timeout=_CLIENT_TIMEOUT, max_retries=0,
+                        default_headers=headers)
         self._clients[family] = c
         return c
 
@@ -757,18 +840,33 @@ class BrainRouter:
 
     # -- main entry ---------------------------------------------------------
     async def chat(self, messages, hard=False, temperature=None, max_tokens=None,
-                   cheap_only=False, intent=None):
+                   cheap_only=False, intent=None, turn_id=None, step=None,
+                   exclude_providers=None):
         """cheap_only: restrict the plan to the cheap tiers (degraded
         mode). intent: the caller's intent ("chat"/"search"/...), used
         only as the EWMA bucket for memory.record_reply_tokens — called
         exactly once per successful reply with tin+tout (reasoning
-        tokens are inside completion_tokens)."""
+        tokens are inside completion_tokens).
+        v1.15: turn_id/step tag every telemetry row of this call (one
+        turn_id per handler turn, propagated by the handler); step
+        names the call ("main", "search_retry", ...). exclude_providers
+        is a set of family names to skip — the roast retry uses it to
+        go to the OTHER provider after a refusal, never the same model.
+        last_call_meta (dict) holds the latest attempt's structured
+        signal (provider/model/finish_reason/refusal/http_status) for
+        the handler's refusal check; {} when no attempt ran."""
         if not any(self.keys.values()):
             return (NO_KEYS_MSG, "none", 0)
         if temperature is None:
             temperature = 0.25 if hard else 0.7
+        turn_id = turn_id or _telemetry.new_turn_id()
+        step = step or "main"
+        self.last_call_meta = {}
 
         plan = self._build_plan(hard, cheap_only=cheap_only)
+        if exclude_providers:
+            plan = [e for e in plan
+                    if e.get("family") not in exclude_providers]
         if not plan:
             return (NO_KEYS_MSG, "none", 0)
 
@@ -818,7 +916,7 @@ class BrainRouter:
             best_tout = 0
             length_retried = False
             for attempt in range(attempts):
-                t0 = time.monotonic()
+                t0 = time.perf_counter()
                 try:
                     resp = await client.chat.completions.create(**kwargs)
                     text = resp.choices[0].message.content or ""
@@ -828,6 +926,26 @@ class BrainRouter:
                     tout = getattr(usage, "completion_tokens", 0) or self.estimate_tokens(text)
                     reasoning = _reasoning_tokens(usage)
                     cached = _cached_tokens(usage)
+                    refused, finish = _refusal_signal(resp)
+                    if refused:
+                        # v1.15: structured refusal (message.refusal /
+                        # content_filter / SAFETY) — no usable reply.
+                        # Do NOT retry this entry: the same model
+                        # refuses again. Record it and move to the
+                        # next entry in the plan.
+                        self.last_call_meta = {
+                            "provider": family, "model": model,
+                            "finish_reason": finish, "refusal": True,
+                            "http_status": 200,
+                        }
+                        _record_attempt(
+                            turn_id, step, family, model,
+                            (time.perf_counter() - t0) * 1000,
+                            finish_reason=finish, tokens_in=tin,
+                            tokens_out=tout, temperature=temperature,
+                            outcome="refused_structured")
+                        last_err = RuntimeError("refused by provider")
+                        break
                     if finish == "length":
                         # v1.13: a length-truncated draft must NEVER be
                         # sent as-is (live 2026-11-27: replies cut off
@@ -855,13 +973,24 @@ class BrainRouter:
                         self._record_reply_tokens(intent or "chat", tin + tout)
                         logger.info(json.dumps({
                             "provider": family, "entry": name, "model": model,
-                            "latency_ms": int((time.monotonic() - t0) * 1000),
+                            "latency_ms": int((time.perf_counter() - t0) * 1000),
                             "tokens_in": tin, "tokens_out": tout,
                             "reasoning_tokens": reasoning, "cached_tokens": cached,
                             "finish_reason": finish,
                             "retries": attempt, "status": "ok",
                             "truncated": True,
                         }, ensure_ascii=False))
+                        self.last_call_meta = {
+                            "provider": family, "model": model,
+                            "finish_reason": finish, "refusal": False,
+                            "http_status": 200,
+                        }
+                        _record_attempt(
+                            turn_id, step, family, model,
+                            (time.perf_counter() - t0) * 1000,
+                            finish_reason=finish, tokens_in=tin,
+                            tokens_out=best_tout,
+                            temperature=temperature)
                         return (best_text, family, best_tout)
                     if not text.strip():
                         raise RuntimeError("empty reply from model")
@@ -871,17 +1000,49 @@ class BrainRouter:
                     self._record_reply_tokens(intent or "chat", tin + tout)
                     logger.info(json.dumps({
                         "provider": family, "entry": name, "model": model,
-                        "latency_ms": int((time.monotonic() - t0) * 1000),
+                        "latency_ms": int((time.perf_counter() - t0) * 1000),
                         "tokens_in": tin, "tokens_out": tout,
                         "reasoning_tokens": reasoning, "cached_tokens": cached,
                         "finish_reason": finish,
                         "retries": attempt, "status": "ok",
                     }, ensure_ascii=False))
+                    self.last_call_meta = {
+                        "provider": family, "model": model,
+                        "finish_reason": finish, "refusal": False,
+                        "http_status": 200,
+                    }
+                    _record_attempt(
+                        turn_id, step, family, model,
+                        (time.perf_counter() - t0) * 1000,
+                        finish_reason=finish, tokens_in=tin,
+                        tokens_out=tout, temperature=temperature)
                     return (text, family, tout)
+                except asyncio.CancelledError:
+                    # The turn deadline (or shutdown) cancelled the
+                    # call mid-flight: record it, then re-raise so
+                    # the deadline converts it to TimeoutError.
+                    _record_attempt(
+                        turn_id, step, family, model,
+                        (time.perf_counter() - t0) * 1000,
+                        temperature=temperature, error_kind="cancelled",
+                        outcome="error")
+                    raise
                 except Exception as e:
                     status = _status_of(e)
-                    latency_ms = int((time.monotonic() - t0) * 1000)
+                    latency_ms = int((time.perf_counter() - t0) * 1000)
                     last_err = e
+                    self.last_call_meta = {
+                        "provider": family, "model": model,
+                        "finish_reason": None, "refusal": False,
+                        "http_status": status,
+                    }
+                    _record_attempt(
+                        turn_id, step, family, model, latency_ms,
+                        status="error", http_status=status,
+                        retry_after=_retry_after(e),
+                        temperature=temperature,
+                        error_kind=_error_kind(e, status),
+                        outcome="blocked_400" if status == 400 else "error")
                     if status == 429:
                         kind, seconds = _classify_429(e, _retry_after(e))
                         self._mark_exhausted(name, seconds=seconds, model=model)

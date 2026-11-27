@@ -341,11 +341,13 @@ async def test_handler_insult_never_cached(handler_env, settings, tmp_db):
     await h._on_group_message_inner(make_update(msg, user, -100222, update_id=321), ctx)
     # v1.11: the insult turn runs the LLM with the picked comeback as
     # an ingredient — the stub router returns "تمام يا عم", which lacks
-    # the ingredient and fails the angry voice check, so the turn costs
-    # 3 router calls (draft + voice-check regen + containment retry) —
-    # but the reply is still never cached, which is what this test
-    # guards.
-    assert len(router.calls) == 3
+    # the ingredient, so the turn costs 2 router calls (draft +
+    # containment retry). v1.15: the voice-check regen is skipped for
+    # ingredient turns (the containment retry is the turn's one
+    # fallback call under the 2-call budget) — before v1.15 this was
+    # 3 calls (draft + voice regen + containment retry). The reply is
+    # still never cached, which is what this test guards.
+    assert len(router.calls) == 2
     assert memory.get_cached_reply(
         normalize_cache_text("بهجت انت حمار"), "just_chat", "angry") is None
 

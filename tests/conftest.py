@@ -58,13 +58,15 @@ def tmp_db(monkeypatch, tmp_path):
     router. brain.memory's own tests define their own tmp_db fixture.
     """
     import tg.handlers as h
-    from brain import memory
+    from brain import memory, telemetry
 
     db = tmp_path / "bahgat.db"
     monkeypatch.setattr(h, "DB_PATH", db)
     monkeypatch.setattr(memory, "DB_PATH", db)
+    monkeypatch.setattr(telemetry, "DB_PATH", db)
     monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
     memory.init_db()
+    telemetry.init_telemetry()
     yield db
     monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
 

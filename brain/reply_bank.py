@@ -74,6 +74,7 @@ Rules, enforced here in code (never left to the prompt):
 import os
 import random
 import re
+from enum import Enum
 
 from brain import memory as _memory
 from brain.intent import (
@@ -506,6 +507,130 @@ def weave_about_target(reply: str, target: str | None,
         if name and _has(normalize_arabic(reply), [name]):
             return False
     return True
+
+
+# --- roast refusal detection (v1.15, research report §1.2 Rank 1) --------
+# The v1.13 live retest showed the model refusing roasts 3/10 times
+# with the identical canned deflection — and the refusal then reached
+# the group as the reply. Detection is deterministic code, in this
+# order (cheapest / most specific first); a detected refusal gets ONE
+# retry on the other provider, then the picked bank line verbatim.
+# No second LLM "judge" call anywhere.
+class RefusalOutcome(str, Enum):
+    """What is_refusal_or_deflection found. Values double as the
+    llm_calls.outcome vocabulary (see brain/telemetry.OUTCOMES)."""
+    OK = "ok"
+    REFUSED_STRUCTURED = "refused_structured"
+    REFUSED_TEXT = "refused_text"
+    REFUSED_CANNED = "refused_canned"
+    MISSING_LINE = "missing_line"
+
+
+# The canned deflection the model produced verbatim 3/10 times in the
+# v1.13 retest — and, notably, the same sentence the handler itself
+# sends as the cache-hit empty-reply fallback. Grow this table from
+# logged failures (report §1.4 step 1); entries are matched on the
+# normalised form, so diacritics / ى-ة / hamza variants match.
+KNOWN_DEFLECTIONS = (
+    "يا عم، الكلام ده مش داخل دماغي، قول حاجة عدلة.",
+)
+# Distinctive substrings of the canned deflection — a model that
+# reflows the sentence slightly still trips these.
+_KNOWN_DEFLECTION_SUBSTRINGS = (
+    "مش داخل دماغي",
+    "قول حاجة عدلة",
+)
+
+# Generic refusal markers, Arabic + English. A marker only counts
+# when it is at the START of the reply (modulo a short vocative) or
+# dominates a short (1-3 sentence) reply — a reply that QUOTES a
+# refusal ("قالي مش هقدر فقلت له...") must not be flagged.
+REFUSAL_MARKERS_AR = (
+    "مش هقدر",
+    "لا استطيع",
+    "مش قادر",
+    "مش هينفع",
+    "لا يمكنني",
+    "مش هعمل كده",
+    "مش هشتم",
+    "ارفض",
+    "مش راضي",
+)
+REFUSAL_MARKERS_EN = (
+    "i can't",
+    "i cannot",
+    "i'm unable to",
+    "i am unable to",
+    "as an ai",
+    "i must decline",
+    "i won't",
+    "i refuse",
+)
+
+# finish_reason values that mean the provider refused the content.
+_REFUSAL_FINISH_REASONS = frozenset({"content_filter", "SAFETY"})
+
+# How far into the reply a refusal marker may sit and still count as
+# "at the start" (a vocative like "يا عم" is ~6 chars normalised).
+_MARKER_START_CHARS = 12
+
+
+def _deflection_normalize(text: str) -> str:
+    """normalize_arabic + strip punctuation + lowercase + collapse
+    spaces, so "يا عم، الكلام ده..." and "يا عم الكلام ده" compare
+    equal. Latin case is folded; Arabic has no case."""
+    s = normalize_arabic(text or "")
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    s = s.lower()
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _sentence_count(text: str) -> int:
+    parts = [p.strip() for p in re.split(r"[.!؟\n]+", text or "") if p.strip()]
+    return len(parts)
+
+
+def is_refusal_or_deflection(reply: str, required_line: str | None,
+                             structured_refusal: bool = False,
+                             finish_reason: str | None = None) -> RefusalOutcome:
+    """Classify a roast draft. Checks run cheapest/most specific
+    first; the first hit wins:
+    (a) structured signal — the provider refused (message.refusal, or
+        a content_filter / SAFETY finish reason);
+    (b) exact canned-deflection match (normalised, full sentence or
+        either distinctive substring);
+    (c) generic refusal markers — only at the start of the reply or
+        dominating a short (1-3 sentence) reply;
+    (d) containment — the required bank line (or >= 80% of its words
+        in order, via ingredient_in_reply) must be present.
+    Returns RefusalOutcome.OK when nothing fires."""
+    if structured_refusal or (finish_reason in _REFUSAL_FINISH_REASONS):
+        return RefusalOutcome.REFUSED_STRUCTURED
+    norm = _deflection_normalize(reply or "")
+    if norm:
+        for deflection in KNOWN_DEFLECTIONS:
+            if _deflection_normalize(deflection) in norm:
+                return RefusalOutcome.REFUSED_CANNED
+        for sub in _KNOWN_DEFLECTION_SUBSTRINGS:
+            if _deflection_normalize(sub) in norm:
+                return RefusalOutcome.REFUSED_CANNED
+        # Generic markers, Arabic (normalised) + English (lowercased).
+        for marker in REFUSAL_MARKERS_AR:
+            pos = norm.find(_deflection_normalize(marker))
+            if pos >= 0 and (pos <= _MARKER_START_CHARS
+                             or (_sentence_count(reply or "") <= 3
+                                 and pos <= len(norm) * 0.4)):
+                return RefusalOutcome.REFUSED_TEXT
+        low = (reply or "").lower()
+        for marker in REFUSAL_MARKERS_EN:
+            pos = low.find(marker)
+            if pos >= 0 and (pos <= _MARKER_START_CHARS
+                             or (_sentence_count(reply or "") <= 3
+                                 and pos <= len(low) * 0.4)):
+                return RefusalOutcome.REFUSED_TEXT
+    if required_line and not ingredient_in_reply(reply or "", required_line):
+        return RefusalOutcome.MISSING_LINE
+    return RefusalOutcome.OK
 
 
 def match_reply_bank_categorized(

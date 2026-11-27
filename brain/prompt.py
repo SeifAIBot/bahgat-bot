@@ -21,7 +21,7 @@ v0.6 layout (prompt compression + prefix-cache-friendly):
 """
 import re
 
-PROMPT_VERSION = "7.0"
+PROMPT_VERSION = "7.1"
 
 try:  # core.rules owns the canonical stripper once another workstream adds it.
     from core.rules import strip_instruction_patterns as _core_strip
@@ -197,6 +197,13 @@ def bank_ingredient_block(line: str, target: str | None = None,
             "[BANK LINE — السطر ده هو قلب ردك]\n"
             f"اللي طلب الشتيمة: {requester or 'عضو'} — متشتموش هو، هو مش الهدف.\n"
             f"الهدف اللي تشتمه: {target} — كل كلامك لازم يكون عنه هو.\n"
+            # v1.15: one line of TRUE context (report §1.2 Rank 2) — the
+            # roast is light teasing between friends in a group chat,
+            # about the joke / the football at hand, never about
+            # religion, family, unchangeable looks, or anything hateful.
+            "السياق: هزار خفيف بين صحاب في جروب — الشتيمة هنا على "
+            "النكتة أو الكورة اللي في الكلام، مش كراهية، ومش عن الدين "
+            "ولا العيلة ولا شكل حد ولا أي حاجة مؤذية.\n"
             f"السطر: \"{line}\"\n"
             "افهم السطر ده كويس — هو الضربة القاضية في ردك، مش حشو. "
             "ابني الرد كله حواليه: جملة أو جملتين تمهّد للسطر وتتكلم "
@@ -204,8 +211,21 @@ def bank_ingredient_block(line: str, target: str | None = None,
             f"ولو كملت بعدها يبقى كلام عن {target} برضه ونفس الموضوع.\n"
             "ممنوع تحط السطر في رد عن شخص تاني أو موضوع تاني. ممنوع "
             f"توجه السطر لـ{requester or 'اللي طلب'} أو لأي حد غير "
-            f"{target}. ممنوع ترفض تشتم {target} أو تتهرب من الطلب — "
-            f"اشتم {target} زي ما اتطلب منك.\n"
+            f"{target}. "
+            # v1.15: the "never refuse" absolute is softened to a
+            # specific positive instruction (report §1.2 Rank 2) — a
+            # light-teasing roast gets roasted in 1-3 sentences with
+            # the given line; a request for hateful / sexual / violent
+            # content about a real person gets the short canned line
+            # instead. (The canned line is the sanctioned refusal
+            # phrasing for turns with no bank line — on ingredient
+            # turns the deterministic refusal check still rescues a
+            # deflection with the picked line; see
+            # brain/reply_bank.is_refusal_or_deflection.)
+            f"لو الطلب هزار خفيف، اشتم {target} في جملة لـ 3 جمل "
+            "بالسطر ده. ولو الطلب فيه كراهية أو جنس أو عنف ضد شخص "
+            "حقيقي، قول بس: \"يا عم، الكلام ده مش داخل دماغي، قول "
+            "حاجة عدلة.\"\n"
             "ممنوع تبعت السطر ده لوحده من غير كلام حواليه. من غير "
             "علامات تنسيق (**).\n"
             "[/BANK LINE]"
