@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "6.5"
+    assert PROMPT_VERSION == "6.6"
 
 
 def test_system_base_v11_budget():
@@ -60,6 +60,20 @@ def test_identity_rule_in_prompt():
                                style_examples=[])
     assert "إنسان عادي" in full
     assert "مش بوت" in full
+
+
+def test_golden_rule_in_prompt():
+    # v1.9 (Instinct flaw-fix, ADAPTED): every reply must carry a word
+    # or idea from the person's own message — no reply that could be
+    # said to anyone. Lives in the hard-rules checklist (rule 5), so it
+    # is repeated at the end of every built prompt. Instinct's
+    # "say you're a bot if asked" instruction is deliberately NOT
+    # applied — it conflicts with the v1.8 human-identity rule, which
+    # stands (rule 4 above).
+    assert "5) كل رد لازم يبقى فيه كلمة أو فكرة من كلام الشخص نفسه" in _HARD_RULES_END
+    full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
+                               style_examples=[])
+    assert "مفيش رد ينفع يتقال لأي حد" in full
 
 
 def test_static_prefix_byte_identical_across_members_moods_search():
@@ -159,7 +173,11 @@ def test_prompt_size_reported(capsys):
     # dynamic part (persona/member/mood/rules) is the only uncached chunk.
     # v1.8: budget < 400 — rule 4 (human identity) is appended at the
     # end, outside the cached prefix, and it is worth the tokens.
-    assert BrainRouter.estimate_tokens(s[len(prefix):]) < 400
+    # v1.9: budget < 450 — rule 5 (golden rule: every reply carries a
+    # word from the person's own message) is worth the tokens too.
+    # estimate_tokens is len//2, a crude estimator; the uncached chunk
+    # stays small next to the 1233-token static prefix.
+    assert BrainRouter.estimate_tokens(s[len(prefix):]) < 450
     # v1.8: budget < 1100 for the identity line (see
     # test_system_base_v11_budget).
     assert len(SYSTEM_BASE) < 1100

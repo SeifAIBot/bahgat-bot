@@ -141,10 +141,12 @@ _WAIT_REPLY = "استنى ثانية"
 # deliver. That promise is exactly what Seif showed in the video: the
 # bot said "هدورلك" and nothing arrived until he asked again. A search
 # question now always ends with an answer in the same turn:
-# - _SEARCH_EMPTY: the search ran and found nothing usable.
+# - _SEARCH_EMPTY: the search ran and found nothing usable. Kept as
+#   the first line of _SEARCH_FAILURE_LINES (v1.9 pool) for tests and
+#   comments; live code picks via _search_failure_line().
 # - _search_fallback_reply(): the search found passages but the LLM
 #   would not answer from them (stalled twice) — answer extractively.
-_SEARCH_EMPTY = "دورت يا عم وملقيتش حاجة عن الموضوع ده — جرب تسألني بطريقة تانية."
+_SEARCH_EMPTY = "دورت وملقتش حاجة تفيد. جرب تصيغ السؤال بشكل تاني؟"
 _TURN_ERROR = "يا عم، حصلت مشكلة تقنية، جرب تاني."
 _FIRM_SEARCH_NOTE = (
     "جاوب دلوقتي من نتائج البحث اللي فوق — متقولش إنك لسه بتدور ولا إنك "
@@ -167,10 +169,8 @@ _MEMBERSHIP_TTL = 600  # 10 min
 _YT_TTL = 600  # 10 min
 _CALLBACK_DEDUP_TTL = 3600  # 1 h
 _VOICE_COOLDOWN = 300  # 1 voice per user per 5 min
-# v1.1: appended to the TEXT fallback when a "قول" voice note failed
-# after both synthesis attempts, so the user SEES the voice didn't
-# come out instead of silently receiving text. Not stored in history.
-_VOICE_FAILED_NOTE = "\nالصوت مش راضي يطلع دلوقتي يا عم، خدها كتابة."
+# (v1.9: the voice-failure note is now a random pick from
+# _VOICE_FAILURE_LINES — see _voice_failure_note() below.)
 # v1.1: same idea for the pacing case — an explicit "قول" request that
 # arrives <5 min after a voice note went out is downgraded to text by
 # the cooldown (by design), but the user asked for voice and got text,
@@ -178,6 +178,45 @@ _VOICE_FAILED_NOTE = "\nالصوت مش راضي يطلع دلوقتي يا عم
 # replies are text by design, no note).
 _VOICE_COOLDOWN_NOTE = "\nالصوت استنى شوية يا عم، خدها كتابة."
 _NOTICE_COOLDOWN = 30  # "استنى ثانية" at most once per 30s per user
+
+# v1.9 (Instinct flaw-fix): failure replies are RANDOM picks from small
+# human-voiced pools — never the programmer-talk lines ("التنزيل فشل",
+# "يوتيوب رافض الطلب من السيرفر") Instinct flagged as the clearest bot
+# tell. A failure sounds like a person shrugging, not a system log.
+# The full technical cause still goes to the host log (data/bot.log);
+# the group only ever sees one of these lines.
+_DOWNLOAD_FAILURE_LINES = (
+    "اللينك ده مرضيش يفتح معايا، جرب تبعته تاني أو ابعت لينك غيره.",
+    "مش راضي ينزل يا صاحبي. جرب لينك تاني وأنا هنا.",
+    "التحميل زعلان مني النهارده، ابعته تاني كمان شوية.",
+)
+_SEARCH_FAILURE_LINES = (
+    "دورت وملقتش حاجة تفيد. جرب تصيغ السؤال بشكل تاني؟",
+    "ملقتش حاجة تتعتمد عليها. ممكن تديني كلمة مفتاحية أدق؟",
+)
+_VOICE_FAILURE_LINES = (
+    "الصوت مش راضي يطلع دلوقتي، خد الرد كتابة وأجرب الصوت بعدين.",
+    "المايك عندي واقع، اقرأها وأنا أظبطه.",
+)
+
+
+def _download_failure_line() -> str:
+    """One human-voiced download failure line (v1.9 pool)."""
+    return random.choice(_DOWNLOAD_FAILURE_LINES)
+
+
+def _search_failure_line() -> str:
+    """One human-voiced search failure line (v1.9 pool)."""
+    return random.choice(_SEARCH_FAILURE_LINES)
+
+
+def _voice_failure_note() -> str:
+    """Voice-failure note appended to the text fallback (v1.9 pool).
+
+    v1.1: appended when a "قول" voice note failed after both synthesis
+    attempts, so the user SEES the voice didn't come out instead of
+    silently receiving text. Not stored in history."""
+    return "\n" + random.choice(_VOICE_FAILURE_LINES)
 
 
 # --- local fallbacks for v0.5 APIs not yet present in brain//tools/ ---------
@@ -925,6 +964,31 @@ async def _typing_loop(bot, chat_id: int, stop: asyncio.Event):
             continue
 
 
+async def _human_delay(bot, chat_id: int, mood: int, text: str) -> None:
+    """Mood-based pause before a reply (v1.9, Instinct flaw-fix).
+
+    A human does not answer everything at the same speed — the pause
+    comes from brain.mood.reply_delay_seconds (mood + message signals,
+    ±30% jitter) and the typing indicator runs during it, re-sent every
+    4s like _typing_loop. Best-effort: a failed chat action never
+    blocks the reply. Returns immediately when the sampled delay is 0
+    (urgent messages)."""
+    fn = getattr(_mood_mod, "reply_delay_seconds", None)
+    delay = fn(mood, text) if fn is not None else 0.0
+    if not delay or delay <= 0:
+        return
+    end = time.monotonic() + delay
+    while True:
+        try:
+            await bot.send_chat_action(chat_id, "typing")
+        except Exception:
+            pass
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(4.0, remaining))
+
+
 # --- live status message (v0.8, edit-in-place since v0.9) ------------------
 # One editable status bubble per turn (OpenClaw-style progress draft — see
 # docs/research-bot-ux.md): sent with disable_notification so the group
@@ -939,8 +1003,18 @@ async def _typing_loop(bot, chat_id: int, stop: asyncio.Event):
 # edit + the chat actions are the closest a bot can get to a "thinking"
 # animation.
 _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+# v1.9: the "thinking" bubble no longer announces processing
+# ("بفكر يا عم، استنى…" — Instinct flagged the announcement itself as
+# a bot tell: people stay silent or answer, they don't narrate that
+# they're thinking). Short human lines instead, cycled by spinner
+# frame so the bubble still rotates while slow work runs. The bubble
+# itself stays (v0.9: the final answer is edited INTO it).
+_THINKING_LINES = (
+    "ثواني...",
+    "لحظة، جايلك حالًا.",
+    "ثواني وجايلك.",
+)
 _STATUS_LINES = {
-    "thinking": "بفكر يا عم، استنى…",
     "searching": "بدورلك على النت، يا عم…",
     "youtube": "بجيبلك من يوتيوب، استنى…",
     "downloading": "بنزلها لك دلوقتي، استنى شوية…",
@@ -949,8 +1023,14 @@ _STATUS_SPIN_SECONDS = 1.5
 
 
 def status_line(stage: str, frame: int = 0) -> str:
-    """One status bubble line: spinner frame + Bahgat-voiced stage text."""
-    text = _STATUS_LINES.get(stage) or _STATUS_LINES["thinking"]
+    """One status bubble line: spinner frame + Bahgat-voiced stage text.
+
+    The thinking stage cycles the short v1.9 lines by frame (deterministic
+    — same frame always gives the same line, so tests stay stable)."""
+    if stage == "thinking" or stage not in _STATUS_LINES:
+        text = _THINKING_LINES[frame % len(_THINKING_LINES)]
+    else:
+        text = _STATUS_LINES[stage]
     return f"{_SPINNER_FRAMES[frame % len(_SPINNER_FRAMES)]} {text}"
 
 
@@ -1326,7 +1406,7 @@ def _search_fallback_reply(search_text: str) -> str:
     Never a "هدورلك" promise — the search already ran."""
     passages = _search_passages(search_text)
     if not passages:
-        return _SEARCH_EMPTY
+        return _search_failure_line()
     first = passages[0]
     excerpt = first["text"][:400].strip()
     return f"بص يا سيدي، دورت ولقيت كده: {excerpt}… — {first['url']}"
@@ -1950,6 +2030,11 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         insult_bump=SITUATION_MOOD_BUMP.get(_situation_early or "general", 40),
     )
     bucket_early = _mood_bucket(mood_early)
+    # v1.9: human-like reply timing — a short mood-based pause with a
+    # typing indicator BEFORE any reply goes out (bank, fast path,
+    # cache, LLM). The 10s per-user pacing still applies on top (the
+    # outer pipeline records the reply timestamp when it is sent).
+    await _human_delay(context.bot, chat_id, mood_early, text)
     norm_early = _normalize_cache_text(text)
     grudge_early = (member_early.get("grudge") or "").strip()
     cache_eligible = (
@@ -2023,7 +2108,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 if _sent:
                     _last_voice[_voice_key] = time.time()
                 else:
-                    await _send_text(msg, bank + _VOICE_FAILED_NOTE)
+                    await _send_text(msg, bank + _voice_failure_note())
             elif (prefix_mode == "voice" and len(bank) < 500
                   and time.time() - _last_voice.get(_voice_key, 0) < _VOICE_COOLDOWN):
                 # Explicit "قول" downgraded by the pacing cooldown —
@@ -2309,7 +2394,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                     reply_is_fallback = True
                     _record_unknown_retry(rescued=False)
             else:
-                reply = _SEARCH_EMPTY
+                reply = _search_failure_line()
                 reply_is_fallback = True
                 _record_unknown_retry(rescued=False)
         elif unanswered and intent != "voice" and not insult_turn:
@@ -2340,7 +2425,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                     reply_is_fallback = True
                     _record_unknown_retry(rescued=False)
             else:
-                reply = _SEARCH_EMPTY
+                reply = _search_failure_line()
                 reply_is_fallback = True
 
         # v1.1 voice check (research method #4): a just_chat/voice reply
@@ -2428,13 +2513,13 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             # Text first, then voice (whole short reply or none — never split).
             # v0.9: the text EDITS the status bubble into the answer.
             # v1.1: an explicit "قول" that did NOT go out as voice is
-            # VISIBLE — a failed attempt gets _VOICE_FAILED_NOTE, a
+            # VISIBLE — a failed attempt gets _voice_failure_note(), a
             # cooldown downgrade gets _VOICE_COOLDOWN_NOTE (short
             # replies only; long replies are text by design, no note).
             send_text = reply
             if voice_only and len(reply) < 500 and not voice_sent:
                 if use_voice:
-                    send_text = reply + _VOICE_FAILED_NOTE
+                    send_text = reply + _voice_failure_note()
                 elif time.time() - _last_voice.get(voice_key, 0) < _VOICE_COOLDOWN:
                     send_text = reply + _VOICE_COOLDOWN_NOTE
             await _send_final(msg, status, send_text)
@@ -2505,12 +2590,14 @@ async def _edit_choice_message(q, text: str) -> None:
 
 
 def _download_error_hint(exc: Exception) -> str:
-    """Short owner-only reason for a download failure, or "" when the
+    """Short classified reason for a download failure, or "" when the
     cause is unknown. Classified from the yt-dlp error text — never
-    leaks paths or raw stderr. Shown only to the owner: group members
-    get the generic line, the owner gets a clue about the real cause
-    (v1.1 — the generic 'جرب لينك تاني' hid a code bug for a whole
-    day: the removed --no-thumbnail flag)."""
+    leaks paths or raw stderr. v1.9: used ONLY in the host log
+    (data/bot.log), never in the chat — the group sees a human-voiced
+    pool line instead (Instinct flagged the in-chat hint
+    "يوتيوب رافض الطلب من السيرفر" as programmer-talk). The v1.1
+    lesson stands: the generic line alone hid a code bug for a whole
+    day, so the classified reason is kept — in the log, not the group."""
     s = str(exc or "").lower()
     if any(m in s for m in (
         "sign in to confirm", "not a bot", "confirm you're not a bot",
@@ -2599,18 +2686,15 @@ async def _on_callback_inner(update, context):
             except Exception as e:
                 # v1.1: the real yt-dlp error goes to the host log (the
                 # RuntimeError now carries the ERROR line, see
-                # tools.youtube._pick_error_detail) and the OWNER gets a
-                # short classified reason — the generic line alone hid
-                # the real cause for a whole day in v1.0.
+                # tools.youtube._pick_error_detail) and to data/bot.log
+                # (v1.8 file logging) — the group only ever sees a
+                # human-voiced pool line (v1.9), never a classified
+                # programmer-talk reason in chat.
                 logger.warning(
-                    "youtube download failed (chat_id=%s audio_only=%s url=%s): %s",
-                    chat_id, audio_only, url, e,
+                    "youtube download failed (chat_id=%s audio_only=%s url=%s hint=%s): %s",
+                    chat_id, audio_only, url, _download_error_hint(e), e,
                 )
-                line = "معلش، التنزيل فشل — جرب لينك تاني أو صوت بس."
-                hint = _download_error_hint(e)
-                if hint and settings is not None and q.from_user is not None and is_owner(q.from_user.id, settings.owner_id):
-                    line += f" ({hint})"
-                await _edit_choice_message(q, line)
+                await _edit_choice_message(q, _download_failure_line())
                 return
             try:
                 with open(path, "rb") as f:

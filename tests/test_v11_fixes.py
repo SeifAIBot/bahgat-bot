@@ -138,7 +138,7 @@ def test_opinion_ask_detection():
 
 
 def test_prompt_version_and_stance():
-    assert PROMPT_VERSION == "6.5"
+    assert PROMPT_VERSION == "6.6"
     # Behaviour-as-verbs + agenda + anti-softening (research method #3).
     assert "بيرد على الشتيمة بشتيمة أقوى" in SYSTEM_BASE
     assert "عندك رأي في كل حاجة" in SYSTEM_BASE
@@ -554,9 +554,16 @@ async def test_bank_voice_failure_is_visible_no_cooldown(
     msg.reply_voice.assert_not_called()
     msg.reply_text.assert_called_once()
     sent = msg.reply_text.await_args.args[0]
-    assert sent.endswith(h._VOICE_FAILED_NOTE)
-    assert sent[: -len(h._VOICE_FAILED_NOTE)] in {
-        e["line"] for e in load_bank()["joke_request"]}
+    # v1.9: the voice-failure note is a random pick from the pool.
+    assert any(sent.endswith("\n" + line)
+               for line in h._VOICE_FAILURE_LINES)
+    core = sent
+    for line in h._VOICE_FAILURE_LINES:
+        suffix = "\n" + line
+        if core.endswith(suffix):
+            core = core[: -len(suffix)]
+            break
+    assert core in {e["line"] for e in load_bank()["joke_request"]}
     assert h._last_voice == {}  # failed voice does not eat the cooldown
 
 

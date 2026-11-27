@@ -28,3 +28,13 @@ def tmp_db(monkeypatch, tmp_path):
     memory.init_db()
     yield db
     monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+
+
+@pytest.fixture(autouse=True)
+def _no_human_delay(monkeypatch):
+    """v1.9: the mood-based reply pause is real time — zero it for every
+    test except the dedicated delay tests (tests/test_mood_delay_v19.py
+    re-patches it itself), so the suite stays fast and deterministic."""
+    from brain import mood as _mood
+
+    monkeypatch.setattr(_mood, "reply_delay_seconds", lambda mood, text: 0.0)

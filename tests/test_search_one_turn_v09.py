@@ -49,8 +49,9 @@ def test_search_fallback_reply_extractive_then_empty():
     assert "حادثة الوراق خبر طويل" in reply
     assert "https://example.com/news" in reply
     assert "هدورلك" not in reply
-    assert h._search_fallback_reply("[SEARCH FAILED] — مفيش نتائج.") == h._SEARCH_EMPTY
-    assert "هدورلك" not in h._SEARCH_EMPTY
+    assert h._search_fallback_reply("[SEARCH FAILED] — مفيش نتائج.") in h._SEARCH_FAILURE_LINES
+    assert all("هدورلك" not in line for line in h._SEARCH_FAILURE_LINES)
+    assert h._SEARCH_EMPTY in h._SEARCH_FAILURE_LINES
 
 
 # --- pipeline harness (FakeBot WITH send_message: edit-in-place path) -------
@@ -227,7 +228,9 @@ async def test_search_empty_when_nothing_found(memory_fakes, settings, tmp_db, m
     # nothing" line in the same turn (not a "هدورلك" promise).
     assert len(router.calls) == 1
     final = _last_status_edit(bot)
-    assert "ملقيتش حاجة" in final
+    # v1.9: the "found nothing" reply is a random pick from the
+    # human-voiced search-failure pool.
+    assert final in h._SEARCH_FAILURE_LINES
     assert "هدورلك" not in final
     msg.reply_text.assert_not_called()
 
@@ -331,8 +334,10 @@ async def test_callback_download_failure_answers_in_chat(
     q = _callback_query("yt:audio", qmsg, 777)
     await h.on_callback(SimpleNamespace(callback_query=q), ctx)
     # The tap produces an in-character error IN the chat, never silence.
+    # v1.9: the error is a random pick from the human-voiced download
+    # failure pool — never programmer-talk.
     qmsg.reply_audio.assert_not_called()
-    assert any("التنزيل فشل" in c.args[0]
+    assert any(c.args[0] in h._DOWNLOAD_FAILURE_LINES
                for c in q.edit_message_text.await_args_list)
 
 

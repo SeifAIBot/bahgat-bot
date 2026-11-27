@@ -14,7 +14,11 @@ OWNER_ID = 1415214630
 
 
 def test_status_lines_are_bahgat_voiced():
-    assert "بفكر" in h.status_line("thinking")
+    # v1.9: the thinking bubble no longer announces processing — short
+    # human lines ("ثواني...", "لحظة، جايلك حالًا.") cycled by frame.
+    thinking = h.status_line("thinking")
+    assert thinking[2:] in h._THINKING_LINES
+    assert "بفكر" not in thinking
     assert "النت" in h.status_line("searching")
     assert "يوتيوب" in h.status_line("youtube")
     assert "بنزلها" in h.status_line("downloading")

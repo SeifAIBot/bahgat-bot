@@ -752,7 +752,8 @@ async def test_joke_voice_failure_is_visible(
         monkeypatch, settings, "بهجت " + LIVE_JOKE, router,
         update_id=931)
     final = msg.reply_text.await_args.args[0]
-    assert h._VOICE_FAILED_NOTE.strip() in final
+    # v1.9: the voice-failure note is a random pick from the pool.
+    assert any(line in final for line in h._VOICE_FAILURE_LINES)
 
 
 async def test_youtube_song_offers_pick_list(

@@ -272,7 +272,7 @@ async def test_live_phrase_bank_intercepts_no_llm_no_search(
     assert grounding_calls == []
     assert bot.sent_status == []  # no status bubble for an insult turn
     final = _final_reply_text(msg)
-    assert final != h._SEARCH_EMPTY
+    assert final not in h._SEARCH_FAILURE_LINES
     assert "ملقيتش حاجة" not in final
 
 
@@ -293,7 +293,7 @@ async def test_insult_variants_never_search_at_handler_level(
     await h._on_group_message_inner(make_update(msg, user, -100222, update_id=912), ctx)
     assert grounding_calls == []
     final = _final_reply_text(msg)
-    assert final != h._SEARCH_EMPTY
+    assert final not in h._SEARCH_FAILURE_LINES
     assert "ملقيتش حاجة" not in final
 
 
@@ -313,7 +313,7 @@ async def test_insult_unknown_first_reply_keeps_first_reply_no_search(
     assert grounding_calls == []
     final = _final_reply_text(msg)
     assert final == UNKNOWN_FIRST_REPLY
-    assert final != h._SEARCH_EMPTY
+    assert final not in h._SEARCH_FAILURE_LINES
 
 
 async def test_roast_request_unknown_first_reply_no_search(
@@ -330,4 +330,4 @@ async def test_roast_request_unknown_first_reply_no_search(
     assert grounding_calls == []
     final = _final_reply_text(msg)
     assert final == UNKNOWN_FIRST_REPLY
-    assert final != h._SEARCH_EMPTY
+    assert final not in h._SEARCH_FAILURE_LINES

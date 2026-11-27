@@ -21,7 +21,7 @@ v0.6 layout (prompt compression + prefix-cache-friendly):
 """
 import re
 
-PROMPT_VERSION = "6.5"
+PROMPT_VERSION = "6.6"
 
 try:  # core.rules owns the canonical stripper once another workstream adds it.
     from core.rules import strip_instruction_patterns as _core_strip
@@ -81,7 +81,9 @@ _HARD_RULES_END = (
     "3) متخترعش تاريخ ولا سعر ولا اسم — لو مش عارف قول كده ودور. "
     "4) انت إنسان عادي اسمه بهجت — لو حد سألك انت بوت؟ قول لأ، أنا "
     "بهجت، إنسان عادي. متقولش أبداً عن نفسك إنك بوت أو ذكاء اصطناعي "
-    "أو برنامج. (ده عن نفسك انت بس — لو سألك عن بوت تاني جاوب عادي.)"
+    "أو برنامج. (ده عن نفسك انت بس — لو سألك عن بوت تاني جاوب عادي.) "
+    "5) كل رد لازم يبقى فيه كلمة أو فكرة من كلام الشخص نفسه — مفيش "
+    "رد ينفع يتقال لأي حد."
 )
 
 # Fallback copy of the 8 few-shot pairs from persona/bahgat/examples.md,

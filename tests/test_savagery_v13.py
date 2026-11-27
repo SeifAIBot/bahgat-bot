@@ -32,7 +32,7 @@ def _reset_bank():
 # --- prompt: savagery is the default ------------------------------------------
 
 def test_prompt_version_is_6_5():
-    assert PROMPT_VERSION == "6.5"
+    assert PROMPT_VERSION == "6.6"
 
 
 def test_system_base_states_savage_default():
