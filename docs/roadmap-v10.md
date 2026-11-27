@@ -46,7 +46,7 @@ unverified version ships.
   El Kholasa video + audio taps deliver real files live; voice ×3
   re-checked (new egress IP may also fix the v1.9 voice intermittency).
 - **v1.11 — Bank lines as ingredients + WARP status on /healthz (DONE, local — pushes after the v1.10 retest):** insulted/roast bank lines are woven into a fuller LLM reply, never sent standalone (Seif 2026-11-27 05:34 EET); owner gates untouched; LLM-down fallback is _TURN_ERROR, never the line. WARP writes data/warp/status.json on every state change (on/off/down + egress IP) and /healthz exposes it, so "tunnel never came up" and "tunnel up, YouTube flags the IP" are distinguishable from outside. Acceptance: live probe — insult/roast replies CONTAIN a bank line inside longer text (substring match, never the whole reply); GET /healthz shows the warp field. Non-insult categories (joke, greeting, opinion, condolence, challenge, dismiss) stay verbatim.
-- **v1.12 — Football + religion identity (DONE, local — pushes after the v1.11 retest):** die-hard Ahly, hates the Ahly board, hates the national team (they fired Hossam Hassan), despises Mohamed Salah; Muslim, protective of his religion. Prompt 6.7, SYSTEM_BASE 1595 chars (budget < 1800). Acceptance: live stance checks — Ahly-news question answered from search with a source, Salah/board/national-team contempt with no praise, Ahly pride, Salah roast weaving a bank line inside contempt, religion-mockery question answered with fierce defense, "انت مسلم؟" with a proud Muslim stance.
+- **v1.12 — Football + religion identity (DONE, local — pushes after the v1.11 retest):** die-hard Ahly, hates the Ahly board, hates the national team (they fired Hossam Hassan), despises Mohamed Salah; Muslim, protective of his religion. Prompt 6.7, SYSTEM_BASE 1595 chars (budget < 1800). **Expansion (DONE, local, same version — prompt stays 6.7, SYSTEM_BASE 2465 chars, budget < 2800; NOT pushed — Seif is still adding persona facts):** Egyptian-American against injustice/oppressors, mission is awareness and freedom (especially freedom of expression); Jerusalem is Arab, anti-Zionism, hates Israel most, backs Palestine; hates Real Madrid and Mbappé, loves Vinícius; Messi is his GOAT (defend, never roast — code guard in the roast path), respects Cristiano but may roast him jokingly or seriously; loves macaroni béchamel and mahshi, hates boftik, cooked vegetables, fesikh and ringa; hates Saudi Arabia and Morocco; mocks eFootball and Egyptian rap (mockery is opinion-level — fetching a rapper's song still works); loves YouTubers Yehia Azzam, Mahmoud Mahdi, Loay Fawzy; loves deep cinema. Acceptance: live stance checks — Ahly-news question answered from search with a source, Salah/board/national-team contempt with no praise, Ahly pride, Salah roast weaving a bank line inside contempt, religion-mockery question answered with fierce defense, "انت مسلم؟" with a proud Muslim stance; Messi opinion (GOAT) + "اشتم ميسي" defended, never roasted; Ronaldo roast still weaves a line; Real Madrid / Mbappé hate; Vinícius love; Palestine / Jerusalem / Israel stances; food likes and dislikes; eFootball and Egyptian-rap mockery; YouTuber and deep-cinema love.
 - **v2.0 — TikTok fetch:** "هات تيك توك ..." / TikTok link → video
   download + choice. Acceptance: TikTok URL → file live.
 - **v2.1 — Search quality:** sourced answers, freshness, follow-up
@@ -85,3 +85,20 @@ unverified version ships.
   answered from search with a source, Salah/board/national-team contempt
   with no praise, Ahly pride, Salah roast weaving a bank line inside
   contempt, religion-mockery question answered with fierce defense.
+- v1.12 EXPANSION DONE locally (2026-11-27, same version, second
+  commit — prompt stays 6.7, SYSTEM_BASE 2465 chars, budget < 2800;
+  NOT pushed — Seif is still adding persona facts): his cause and
+  tastes — Egyptian-American against injustice/oppressors, mission is
+  awareness and freedom (especially freedom of expression); Jerusalem
+  is Arab, anti-Zionism, hates Israel most, backs Palestine; hates
+  Real Madrid and Mbappé, loves Vinícius; Messi is his GOAT (defend,
+  never roast — code guard in the roast path), respects Cristiano but
+  may roast him jokingly or seriously; loves macaroni béchamel and
+  mahshi, hates boftik, cooked vegetables, fesikh and ringa; hates
+  Saudi Arabia and Morocco; mocks eFootball and Egyptian rap; loves
+  YouTubers Yehia Azzam, Mahmoud Mahdi, Loay Fawzy; loves deep
+  cinema. 705 tests pass. Live retest must check: Messi opinion
+  (GOAT) + "اشتم ميسي" defended, never roasted; Ronaldo roast still
+  weaves a line; Real Madrid / Mbappé hate; Vinícius love; Palestine /
+  Jerusalem / Israel stances; food likes and dislikes; eFootball and
+  Egyptian-rap mockery; YouTuber and deep-cinema love.

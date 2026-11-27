@@ -41,8 +41,9 @@ def test_system_base_v11_budget():
     # football + religion identity blocks (Seif 2026-11-27 06:05 EET —
     # die-hard Ahly, hates the board, hates the national team over
     # Hossam Hassan, despises Salah; Muslim, protective of his
-    # religion): budget < 1800.
-    assert len(SYSTEM_BASE) < 1800
+    # religion): budget < 1800. v1.12 expansion (same morning, second
+    # commit): budget < 2800 for the cause + tastes block.
+    assert len(SYSTEM_BASE) < 2800
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
                  "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>",
                  "إنسان عادي", "مش بوت"):
@@ -184,8 +185,9 @@ def test_prompt_size_reported(capsys):
     assert BrainRouter.estimate_tokens(s[len(prefix):]) < 450
     # v1.8: budget < 1100 for the identity line (see
     # test_system_base_v11_budget). v1.12: budget < 1800 for the
-    # football + religion identity blocks.
-    assert len(SYSTEM_BASE) < 1800
+    # football + religion identity blocks. v1.12 expansion: < 2800
+    # for the cause + tastes block.
+    assert len(SYSTEM_BASE) < 2800
 
 
 def test_memory_block_unchanged():

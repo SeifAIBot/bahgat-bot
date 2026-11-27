@@ -192,6 +192,16 @@ _TARGET_ALIASES = {
 }
 
 
+# v1.12 (Seif 2026-11-27): Messi is Bahgat's GOAT — a roast request
+# for Messi must NEVER pick a bank line. The request falls through to
+# the plain LLM turn, where the persona defends him instead. Without
+# this, the v1.11 ingredient path would force a generic insult line
+# into a reply that should be a defense. "ليونيل" is Messi's first
+# name and unambiguous (unlike the bare-"عبد" trap in the alias
+# comment above); "ميسى" normalises to "ميسي" via normalize_arabic.
+_MESSI_TARGETS = frozenset({"ميسي", "messi", "ليونيل"})
+
+
 def _target_matches(line_target, roast_target: str | None) -> bool:
     """True when a bank line may serve for this roast target. A line
     with no `target:` field is generic and fits any target; a tagged
@@ -435,19 +445,23 @@ def match_reply_bank_categorized(
     roast_target = extract_insult_target(text)
     if roast_target and not target_is_owner:
         if normalize_arabic(roast_target) != "بهجت":
-            # v1.3: target-specific lines (target: السيسي ...) fire only
-            # for their subject; any other target gets generic lines.
-            # v1.6 phase 2: the roast prefers lines tagged with the
-            # situation from the request's extra words ("عشان بيتباهى").
-            line = _pick(
-                "roast", chat_id,
-                member_safe_only=(target_is_member is not False),
-                target=roast_target,
-                situation=detect_roast_situation(text),
-                user_id=user_id,
-            )
-            if line is not None:
-                return ("roast", line)
+            # v1.12: Messi is the GOAT — never a bank line for him.
+            # Skip the pick entirely so the request falls through to
+            # the plain LLM turn, where the persona defends him.
+            if normalize_arabic(roast_target) not in _MESSI_TARGETS:
+                # v1.3: target-specific lines (target: السيسي ...) fire only
+                # for their subject; any other target gets generic lines.
+                # v1.6 phase 2: the roast prefers lines tagged with the
+                # situation from the request's extra words ("عشان بيتباهى").
+                line = _pick(
+                    "roast", chat_id,
+                    member_safe_only=(target_is_member is not False),
+                    target=roast_target,
+                    situation=detect_roast_situation(text),
+                    user_id=user_id,
+                )
+                if line is not None:
+                    return ("roast", line)
 
     # Joke request ("قول نكته" / "قولي نكته" / "هات نكته").
     if _has(t, _JOKE_WORDS):
