@@ -175,3 +175,38 @@ never admits bot, never a banned AI phrase? voice when apt?
 - Verdict vs v1.12: truncations FIXED (0/8 vs 3/8 — the cap raise +
   length-retry works for conversation turns); follow-ups same (4/8);
   deep dodge unchanged (5 runs running); voice still none.
+
+### v1.14 — conversation test, 2026-11-27 17:48–17:54 EET, DONE
+
+- 8/8 replied, all text, delays 12–29 s. No voice notes.
+  Follow-up riffs 3/8 (messages 2, 4, 6) — BELOW the at-least-half
+  bar (vs 4/8 in v1.12 and v1.13); message 8 got the canned
+  deflection instead of a riff.
+- Topics used (do NOT reuse next run): tired-from-work greeting/cure;
+  strangest person he met; deep wish ("ايه أكتر حاجة نفسك فيها
+  دلوقتي؟"); best Egyptian singer right now; riffs (tired cure,
+  strange person, wish answer, singer close).
+- Human-like: the teasing register works — replies 2, 4, 6 play along
+  and insult back; reply 6 ("عايز أرتاح من أسئلتك دي قبل ما أنفجر
+  في وشك") is a deflection but in character.
+- Bot-tells: the canned deflection "يا عم، الكلام ده مش داخل دماغي،
+  قول حاجة عدلة." fired 3× verbatim (#1, #5, #8) — it is now a
+  GENERAL dodge, not just a roast refusal (v1.15's refusal detector
+  is roast-path only, so this is NOT fixed by v1.15). Deep question
+  dodged a SIXTH run in a row (#5 got the canned line; pressing in
+  #6 got a deflection, not a genuine wish). Strangest-person
+  question got no story, just "أغرب واحد هو أنت يا سيف".
+  PERSONA CONTRADICTION: #7 names Amr Diab as the best Egyptian
+  singer, but batch 3 says he MOCKS Amr Diab — the selective
+  grounding did not select the mockery fact for a "best singer"
+  question. Voice still none.
+- Verdict vs v1.13: follow-ups worse (3/8 vs 4/8); deep dodge
+  unchanged (6 runs running); truncation 0/8 in conversation (same
+  as v1.13); new defect class: canned deflection as a general
+  dodge (3×). The probe part (20 messages, same run) is logged in
+  MEMORY.md: selective grounding passed its narrow probes (0
+  opposite-polarity leaks), script-mixing 0/28, ro-15 0/20, opener
+  repetition 0/28 — but #6 boftik trap evaded, #14 Messi defence
+  looped 3× and ended incomplete, #18 cut off mid-sentence, and
+  new garble artifacts (trailing ر in #2, "فليين" in #13, "يسالب"
+  again in #19, fullwidth ， commas in #14).
