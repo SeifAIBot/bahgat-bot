@@ -46,6 +46,7 @@ unverified version ships.
   El Kholasa video + audio taps deliver real files live; voice ×3
   re-checked (new egress IP may also fix the v1.9 voice intermittency).
 - **v1.11 — Bank lines as ingredients + WARP status on /healthz (DONE, local — pushes after the v1.10 retest):** insulted/roast bank lines are woven into a fuller LLM reply, never sent standalone (Seif 2026-11-27 05:34 EET); owner gates untouched; LLM-down fallback is _TURN_ERROR, never the line. WARP writes data/warp/status.json on every state change (on/off/down + egress IP) and /healthz exposes it, so "tunnel never came up" and "tunnel up, YouTube flags the IP" are distinguishable from outside. Acceptance: live probe — insult/roast replies CONTAIN a bank line inside longer text (substring match, never the whole reply); GET /healthz shows the warp field. Non-insult categories (joke, greeting, opinion, condolence, challenge, dismiss) stay verbatim.
+- **v1.12 — Football + religion identity (DONE, local — pushes after the v1.11 retest):** die-hard Ahly, hates the Ahly board, hates the national team (they fired Hossam Hassan), despises Mohamed Salah; Muslim, protective of his religion. Prompt 6.7, SYSTEM_BASE 1595 chars (budget < 1800). Acceptance: live stance checks — Ahly-news question answered from search with a source, Salah/board/national-team contempt with no praise, Ahly pride, Salah roast weaving a bank line inside contempt, religion-mockery question answered with fierce defense, "انت مسلم؟" with a proud Muslim stance.
 - **v2.0 — TikTok fetch:** "هات تيك توك ..." / TikTok link → video
   download + choice. Acceptance: TikTok URL → file live.
 - **v2.1 — Search quality:** sourced answers, freshness, follow-up
@@ -76,3 +77,11 @@ unverified version ships.
   625 tests pass. Live retest must check: insult/roast replies contain a
   bank line inside longer text (never the whole reply), and /healthz
   carries the warp field.
+- v1.12 DONE locally (2026-11-27, not pushed — pushes after the v1.11
+  redeploy + retest): football + religion identity in the persona
+  (prompt 6.7 — die-hard Ahly, hates the board, hates the national
+  team over Hossam Hassan, despises Salah; Muslim, protective of his
+  religion). 651 tests pass. Live retest must check: Ahly-news question
+  answered from search with a source, Salah/board/national-team contempt
+  with no praise, Ahly pride, Salah roast weaving a bank line inside
+  contempt, religion-mockery question answered with fierce defense.

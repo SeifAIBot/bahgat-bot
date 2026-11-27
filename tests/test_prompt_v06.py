@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "6.6"
+    assert PROMPT_VERSION == "6.7"
 
 
 def test_system_base_v11_budget():
@@ -37,8 +37,12 @@ def test_system_base_v11_budget():
     # §6.1): the budget is now < 1000 chars, with every hard rule kept
     # and the new behaviour lines present. v1.8 grows it once more for
     # the identity line (Seif's directive — Bahgat is a normal human,
-    # never a bot): budget < 1100.
-    assert len(SYSTEM_BASE) < 1100
+    # never a bot): budget < 1100. v1.12 grows it again for the
+    # football + religion identity blocks (Seif 2026-11-27 06:05 EET —
+    # die-hard Ahly, hates the board, hates the national team over
+    # Hossam Hassan, despises Salah; Muslim, protective of his
+    # religion): budget < 1800.
+    assert len(SYSTEM_BASE) < 1800
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
                  "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>",
                  "إنسان عادي", "مش بوت"):
@@ -179,8 +183,9 @@ def test_prompt_size_reported(capsys):
     # stays small next to the 1233-token static prefix.
     assert BrainRouter.estimate_tokens(s[len(prefix):]) < 450
     # v1.8: budget < 1100 for the identity line (see
-    # test_system_base_v11_budget).
-    assert len(SYSTEM_BASE) < 1100
+    # test_system_base_v11_budget). v1.12: budget < 1800 for the
+    # football + religion identity blocks.
+    assert len(SYSTEM_BASE) < 1800
 
 
 def test_memory_block_unchanged():

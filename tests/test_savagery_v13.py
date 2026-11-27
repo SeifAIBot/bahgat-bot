@@ -31,8 +31,8 @@ def _reset_bank():
 
 # --- prompt: savagery is the default ------------------------------------------
 
-def test_prompt_version_is_6_5():
-    assert PROMPT_VERSION == "6.6"
+def test_prompt_version_is_6_7():
+    assert PROMPT_VERSION == "6.7"
 
 
 def test_system_base_states_savage_default():
@@ -45,8 +45,9 @@ def test_system_base_states_savage_default():
     for line in ("بيرد على الشتيمة بشتيمة أقوى", "عندك رأي في كل حاجة",
                  "متعتذرش، متقولش كنت بهزر", "لزماتك:"):
         assert line in SYSTEM_BASE
-    # v1.8: budget < 1100 for the identity line.
-    assert len(SYSTEM_BASE) < 1100
+    # v1.8: budget < 1100 for the identity line. v1.12: budget < 1800
+    # for the football + religion identity blocks.
+    assert len(SYSTEM_BASE) < 1800
 
 
 def test_built_prompt_carries_savage_default():

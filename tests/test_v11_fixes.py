@@ -138,7 +138,7 @@ def test_opinion_ask_detection():
 
 
 def test_prompt_version_and_stance():
-    assert PROMPT_VERSION == "6.6"
+    assert PROMPT_VERSION == "6.7"
     # Behaviour-as-verbs + agenda + anti-softening (research method #3).
     assert "بيرد على الشتيمة بشتيمة أقوى" in SYSTEM_BASE
     assert "عندك رأي في كل حاجة" in SYSTEM_BASE
