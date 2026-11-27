@@ -56,6 +56,14 @@ def _content_words(text: str) -> list[str]:
     return re.sub(r"\s+", " ", t).strip().split() if t.strip() else []
 
 
+def _skip_leading_vocative(words: list[str]) -> list[str]:
+    """Drop a LEADING "يا" vocative ("يا بهجت قول ..." — _content_words
+    already stripped "بهجت", so the first content word is "يا"; "يا قول
+    ..." has no بهجت at all). Only the first word is touched: "يا"
+    mid-sentence is content ("قول يا عم نكته" keeps its "يا")."""
+    return words[1:] if words and words[0] == "يا" else words
+
+
 # All patterns below are written in NORMALISED form (e.g. "علي" not "على",
 # "النتيجه" not "النتيجة") because matching runs on normalised text — and
 # since v1.0 _has() normalises the keywords too, so a list entry written
@@ -210,7 +218,12 @@ def detect_intent(text: str) -> str:
 # This is tier 1 of hybrid routing (rules first for unambiguous
 # triggers, classifier for the ambiguous tail — see
 # docs/research-intent-routing.md §5). The message may start with the
-# trigger "بهجت" (or an @mention) before the prefix word. Matching is
+# trigger "بهجت" (or an @mention) before the prefix word. v1.7: it
+# may also start with the vocative "يا" — "يا بهجت قول ..." and "يا
+# قول ..." — which _content_words does NOT strip (it only strips
+# "بهجت" and @mentions); detect_prefix_mode skips one leading "يا" so
+# Seif's usual "يا بهجت ..." form reaches the prefix layer, while a
+# "يا" anywhere else in the message is untouched. Matching is
 # word-boundary + normalised, so "دورلي" is NOT the "دور" prefix and
 # "الدور" is not either.
 #
@@ -231,7 +244,8 @@ def detect_prefix_mode(text: str) -> tuple[str, str] | None:
     prefix word, ready to use as a search / YouTube query — for a
     prefix search it is self-contained and must NOT get the follow-up
     topic inheritance (_search_query) applied to it."""
-    words = _content_words(normalize_arabic(text or ""))
+    words = _skip_leading_vocative(
+        _content_words(normalize_arabic(text or "")))
     if not words:
         return None
     first, rest = words[0], words[1:]
@@ -382,6 +396,11 @@ def detect_fast_reply(text: str, mood: int = 30) -> str | None:
     if looks_like_insult(text):
         return None
     words = _content_words(t)
+    # v1.7: same leading-vocative gap as the prefix layer — "يا بهجت
+    # شكرا" built "يا شكرا" and missed the fast path, so a thank-you
+    # in Seif's usual form cost a full LLM turn. Only the leading "يا"
+    # is dropped; the insult guard above already ran on the full text.
+    words = _skip_leading_vocative(words)
     if not words:
         return _fast_pick("bare", t)
     if len(words) > _TRIVIAL_MAX_WORDS:

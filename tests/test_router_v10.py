@@ -127,6 +127,16 @@ def test_fast_reply_variants():
     assert detect_fast_reply("بهجت", mood=30) in _FAST_REPLIES["bare"]
 
 
+def test_fast_reply_ya_vocative():
+    # v1.7: the fast path skips a leading "يا" too — "يا بهجت شكرا"
+    # is the same thank-you as "شكرا يا بهجت" and must not cost an
+    # LLM turn. Bare "يا بهجت" behaves like bare "بهجت".
+    assert detect_fast_reply("يا بهجت شكرا", mood=30) in _FAST_REPLIES["thanks"]
+    assert detect_fast_reply("يا بهجت عامل ايه", mood=30) in _FAST_REPLIES["greeting"]
+    assert detect_fast_reply("يا بهجت تمام", mood=30) in _FAST_REPLIES["ack"]
+    assert detect_fast_reply("يا بهجت", mood=30) in _FAST_REPLIES["bare"]
+
+
 def test_fast_reply_guards():
     # Apologies are real turns (forgiveness), never templates.
     assert detect_fast_reply("خلاص انا اسف", mood=30) is None
