@@ -10,6 +10,16 @@ writes (data/heartbeat.json, refreshed every 60s by tg/app.py):
   < 300s old, otherwise 503 {"status":"unavailable", ...}.
 Anything else -> 404. Only GET is served.
 
+The payload also carries "warp": the WARP tunnel status from
+data/warp/status.json (tools/warp.py read_status) — "on" (tunnel up,
+with the egress IP), "off" (kill switch), "down" (tunnel never came
+up / stopped), "unknown" (no state recorded since boot). This is the
+outside signal that distinguishes "UDP blocked on the host" from
+"YouTube flags the WARP IP" — the two live download failure modes
+that look identical from the group and whose gate-check result is
+otherwise trapped in data/bot.log, which the Cloady free tier cannot
+show.
+
 Binds 0.0.0.0:$PORT (env PORT, default 8080) — Northflank injects $PORT
 and maps it to the service's public port.
 """
@@ -22,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from core.config import data_dir
+from tools import warp as _warp
 
 logger = logging.getLogger("bahgat.health")
 
@@ -66,10 +77,15 @@ def _make_handler(heartbeat_path: Path):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler naming
             if self.path in HEALTH_PATHS:
                 healthy, age = _check(heartbeat_path)
+                # v1.11: warp tunnel status rides along — read fresh per
+                # request (a tiny file read); never affects the liveness
+                # verdict, which is the heartbeat alone.
+                payload = {"warp": _warp.read_status()}
                 if healthy:
                     self._send_json(
                         200,
-                        {"status": "ok", "last_poll_age_seconds": int(age)},
+                        {"status": "ok", "last_poll_age_seconds": int(age),
+                         **payload},
                     )
                 else:
                     self._send_json(
@@ -79,6 +95,7 @@ def _make_handler(heartbeat_path: Path):
                             "last_poll_age_seconds": (
                                 int(age) if age is not None else None
                             ),
+                            **payload,
                         },
                     )
             else:

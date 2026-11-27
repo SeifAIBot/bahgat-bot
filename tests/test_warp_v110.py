@@ -6,6 +6,7 @@ switch, enrolment cap of 3, proxy-error circuit breaker. No network in
 these tests: wgcf/wireproxy/subprocess are stubbed, the SOCKS check is
 stubbed, and the trace check is stubbed.
 """
+import json
 import logging
 from types import SimpleNamespace
 
@@ -396,3 +397,80 @@ def test_proxy_url_never_logged(monkeypatch, tmp_path, caplog):
             yt.download("https://www.youtube.com/watch?v=dQw4w9WgXcQ", False,
                         out_dir=str(tmp_path / "req"))
     assert "127.0.0.1:1080" not in caplog.text
+
+
+# --- status file (v1.11) -------------------------------------------------------
+# data/warp/status.json is written on every state change so /healthz can
+# tell "tunnel never came up" (down) from "tunnel up, YouTube flags the
+# WARP IP" (on) without log access.
+
+def _status(tmp_path):
+    return json.loads((tmp_path / "warp" / warp.STATUS_FILE).read_text())
+
+
+def test_status_file_on_when_tunnel_up(monkeypatch, tmp_path):
+    _fake_wgcf_success(monkeypatch, tmp_path)
+    monkeypatch.setattr(warp, "_start_wireproxy", lambda conf: _fake_proc(alive=True))
+    monkeypatch.setattr(warp, "_wait_for_tunnel", lambda timeout=20: True)
+    monkeypatch.setattr(warp, "egress_status",
+                        lambda: {"warp": "on", "ip": "203.0.113.7"})
+    assert warp.ensure_warp() is True
+    status = _status(tmp_path)
+    assert status["warp"] == "on"
+    assert status["ip"] == "203.0.113.7"
+    assert status["enrolments"] == 1
+    assert isinstance(status["updated"], int) and status["updated"] > 0
+    assert warp.read_status() == status
+
+
+def test_status_file_down_when_tunnel_fails(monkeypatch, tmp_path):
+    _fake_wgcf_success(monkeypatch, tmp_path)
+    proc = _fake_proc(alive=True)
+    monkeypatch.setattr(warp, "_start_wireproxy", lambda conf: proc)
+    monkeypatch.setattr(warp, "_wait_for_tunnel", lambda timeout=20: False)
+    assert warp.ensure_warp() is False
+    status = _status(tmp_path)
+    assert status["warp"] == "down"
+    assert status["ip"] is None
+    assert status["enrolments"] == 1  # enrolment happened; the tunnel did not
+
+
+def test_status_file_off_when_disabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("WARP_ENABLED", "0")
+    assert warp.ensure_warp() is False
+    status = _status(tmp_path)
+    assert status["warp"] == "off"
+    assert status["ip"] is None
+    assert status["enrolments"] == 0
+
+
+def test_status_file_down_when_enrolment_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(warp, "_run_wgcf",
+                        lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("wgcf")))
+    assert warp.ensure_warp() is False
+    assert _status(tmp_path)["warp"] == "down"
+
+
+def test_read_status_unknown_when_no_file():
+    assert warp.read_status() == {
+        "warp": "unknown", "ip": None, "enrolments": 0, "updated": None}
+
+
+def test_read_status_corrupt_file_returns_unknown(tmp_path):
+    warp.warp_dir().mkdir(parents=True)
+    (tmp_path / "warp" / warp.STATUS_FILE).write_text("not json{")
+    assert warp.read_status()["warp"] == "unknown"
+
+
+def test_stop_warp_writes_down(monkeypatch, tmp_path):
+    _fake_wgcf_success(monkeypatch, tmp_path)
+    monkeypatch.setattr(warp, "_start_wireproxy", lambda conf: _fake_proc(alive=True))
+    monkeypatch.setattr(warp, "_wait_for_tunnel", lambda timeout=20: True)
+    monkeypatch.setattr(warp, "egress_status",
+                        lambda: {"warp": "on", "ip": "203.0.113.7"})
+    assert warp.ensure_warp() is True
+    assert warp.read_status()["warp"] == "on"
+    warp.stop_warp()
+    status = warp.read_status()
+    assert status["warp"] == "down"
+    assert status["ip"] is None  # the down write carries no egress IP

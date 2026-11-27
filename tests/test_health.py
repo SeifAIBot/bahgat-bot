@@ -101,6 +101,40 @@ def test_healthz_503_missing_heartbeat(server, heartbeat):
     assert body["last_poll_age_seconds"] is None
 
 
+def test_healthz_includes_warp_status(monkeypatch, tmp_path, server, heartbeat):
+    """v1.11: /healthz carries the warp tunnel status from status.json —
+    the outside signal that separates 'tunnel never came up' (down)
+    from 'tunnel up, YouTube flags the WARP IP' (on)."""
+    _, write = heartbeat
+    write.fresh()
+    data = tmp_path / "data"
+    (data / "warp").mkdir(parents=True)
+    (data / "warp" / "status.json").write_text(json.dumps({
+        "warp": "on", "ip": "203.0.113.7", "enrolments": 1,
+        "updated": 1234567890,
+    }), encoding="utf-8")
+    monkeypatch.setenv("BAHGAT_DATA_DIR", str(data))
+    status, body = _get(server.server_address[1], "/healthz")
+    assert status == 200
+    assert body["warp"] == {
+        "warp": "on", "ip": "203.0.113.7", "enrolments": 1,
+        "updated": 1234567890,
+    }
+
+
+def test_healthz_warp_unknown_when_no_status_file(monkeypatch, tmp_path, server, heartbeat):
+    """No status file yet (warp thread not run since boot) -> 'unknown',
+    not a missing key and not a liveness failure."""
+    _, write = heartbeat
+    write.fresh()
+    monkeypatch.setenv("BAHGAT_DATA_DIR", str(tmp_path / "empty-data"))
+    status, body = _get(server.server_address[1], "/healthz")
+    assert status == 200
+    assert body["warp"] == {
+        "warp": "unknown", "ip": None, "enrolments": 0, "updated": None,
+    }
+
+
 def test_unknown_path_404(server, heartbeat):
     _, write = heartbeat
     write.fresh()

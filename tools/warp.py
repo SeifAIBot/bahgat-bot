@@ -34,6 +34,17 @@ the proxy to cloudflare.com/cdn-cgi/trace must return warp=on, and the
 egress IP is logged. If outbound UDP is blocked on the host, the tunnel
 never comes up and downloads stay direct — that is the expected failure
 mode, not a crash.
+
+Status file (v1.11): every state change writes data/warp/status.json —
+{"warp": "on"|"off"|"down", "ip": <egress>, "enrolments": n,
+"updated": <unix ts>}. The egress IP is a datacenter/WARP address, not
+a secret (see egress_status). /healthz exposes this file, so the two
+live failure modes are distinguishable from outside without log access
+(the Cloady free tier cannot show data/bot.log): "down" = the tunnel
+never came up (UDP blocked); "on" + an IP = the tunnel is up and the
+download failure is something else (e.g. YouTube flagging the WARP IP).
+"off" = WARP disabled via the kill switch. No file yet = "unknown"
+(the warp thread has not run since boot).
 """
 import json
 import logging
@@ -59,6 +70,7 @@ WGCF_PROFILE_FILE = "wgcf-profile.conf"
 WIREPROXY_CONF_FILE = "wireproxy.conf"
 WIREPROXY_LOG_FILE = "wireproxy.log"
 STATE_FILE = "warp-state.json"
+STATUS_FILE = "status.json"
 
 SOCKS_HOST = "127.0.0.1"
 SOCKS_PORT = 1080
@@ -225,6 +237,53 @@ def _save_state(state: dict) -> None:
         logger.warning("could not save warp state (%s)", e)
 
 
+# --- status file (v1.11) ---------------------------------------------------
+
+def _write_status(warp: str, ip: str | None = None) -> None:
+    """Write data/warp/status.json on every state change.
+
+    warp is "on" (tunnel up, gate check passed), "off" (kill switch),
+    or "down" (tunnel never came up / stopped). The enrolment count
+    comes from the persisted state. Best-effort: a failed write is
+    logged and never raises — status must not break the tunnel path.
+    The egress IP is a datacenter/WARP address, not a secret.
+    """
+    path = warp_dir() / STATUS_FILE
+    try:
+        enrolments = _load_state().get("enrolments", 0)
+        payload = {
+            "warp": warp,
+            "ip": ip,
+            "enrolments": enrolments,
+            "updated": int(time.time()),
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError as e:
+        logger.warning("could not write warp status (%s)", e)
+
+
+def read_status() -> dict:
+    """The status file for /healthz, or the "unknown" default when no
+    state change has been recorded yet (warp thread not run since boot)
+    or the file is corrupt. Never raises."""
+    default = {"warp": "unknown", "ip": None, "enrolments": 0, "updated": None}
+    path = warp_dir() / STATUS_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("warp") not in (
+                "on", "off", "down", "unknown"):
+            raise ValueError("bad status payload")
+        return {
+            "warp": data.get("warp", "unknown"),
+            "ip": data.get("ip"),
+            "enrolments": int(data.get("enrolments") or 0),
+            "updated": data.get("updated"),
+        }
+    except (OSError, ValueError, TypeError):
+        return default
+
+
 def _chmod_private(path: Path) -> None:
     """Best-effort 0600 on files holding the WARP private key."""
     try:
@@ -364,6 +423,7 @@ def _ensure_warp_inner() -> bool:
     global _WIREPROXY_PROC
     if not warp_enabled():
         logger.info("warp: disabled (WARP_ENABLED off); downloads go direct")
+        _write_status("off")
         return False
     if _WIREPROXY_PROC is not None and _WIREPROXY_PROC.poll() is None:
         return True
@@ -403,15 +463,18 @@ def _ensure_warp_inner() -> bool:
         if reenrol_attempted:
             # The re-enrolment above already tried once this boot; do
             # not burn a second registration on the same failure.
+            _write_status("down")
             return False
         if state["enrolments"] >= MAX_ENROLMENTS:
             logger.warning(
                 "warp: no profile and enrolment cap reached (%d); "
                 "downloads stay direct", MAX_ENROLMENTS)
+            _write_status("down")
             return False
         logger.info("warp: no profile yet, enrolling (attempt %d/%d)",
                     state["enrolments"] + 1, MAX_ENROLMENTS)
         if not _enrol():
+            _write_status("down")
             return False
         state["enrolments"] += 1
         _save_state(state)
@@ -419,9 +482,13 @@ def _ensure_warp_inner() -> bool:
     conf = _build_wireproxy_conf()
     proc = _start_wireproxy(conf)
     if proc is None:
+        _write_status("down")
         return False
     _WIREPROXY_PROC = proc
     if _wait_for_tunnel():
+        # Gate passed: re-read the egress IP for the status file (the
+        # trace check inside _wait_for_tunnel already proved warp=on).
+        _write_status("on", ip=egress_status().get("ip"))
         return True
     _stop_wireproxy_locked()
     return False
@@ -433,6 +500,9 @@ def _stop_wireproxy_locked() -> None:
     _WIREPROXY_PROC = None
     if proc is None:
         return
+    # v1.11: the tunnel is stopping — record it, so /healthz never
+    # reports a stale "on" after the proxy is gone.
+    _write_status("down")
     try:
         if proc.poll() is None:
             proc.terminate()

@@ -28,6 +28,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from conftest import WeavingRouter, ingredient_of_call
 
 import tg.handlers as h
 from brain.intent import (
@@ -261,17 +262,22 @@ def _final_reply_text(msg):
 
 async def test_live_phrase_bank_intercepts_no_llm_no_search(
         memory_fakes, settings, tmp_db, monkeypatch):
-    # The exact live phrase, end to end: the reply-bank insulted fast
-    # path answers it, so the LLM is never called and no search runs.
+    # The exact live phrase, end to end: v1.11 — the bank comeback is
+    # an INGREDIENT now: the LLM turn runs once with the picked line
+    # in a [BANK LINE] block, the final reply weaves it into a fuller
+    # reply, and still no search runs and no _SEARCH_EMPTY appears.
     grounding_calls = []
-    router = ScriptedRouter([UNKNOWN_FIRST_REPLY])
+    router = WeavingRouter()
     ctx, bot, msg, user = _run_turn(
         monkeypatch, settings, "يا بهجت انتا حمار", router, grounding_calls)
     await h._on_group_message_inner(make_update(msg, user, -100222, update_id=911), ctx)
-    assert router.calls == []
+    assert len(router.calls) == 1
     assert grounding_calls == []
     assert bot.sent_status == []  # no status bubble for an insult turn
+    line = ingredient_of_call(router.calls[0])
+    assert line is not None, "no [BANK LINE] ingredient in the LLM call"
     final = _final_reply_text(msg)
+    assert line in final and len(final) > len(line)
     assert final not in h._SEARCH_FAILURE_LINES
     assert "ملقيتش حاجة" not in final
 
@@ -303,7 +309,7 @@ async def test_insult_unknown_first_reply_keeps_first_reply_no_search(
     # first reply looks "unknown", which is exactly what used to trigger
     # the search retry. The turn must keep its first reply, run NO
     # search, and never produce _SEARCH_EMPTY.
-    monkeypatch.setattr(h, "match_reply_bank", lambda *a, **k: None)
+    monkeypatch.setattr(h, "match_reply_bank_categorized", lambda *a, **k: None)
     grounding_calls = []
     router = ScriptedRouter([UNKNOWN_FIRST_REPLY])
     ctx, bot, msg, user = _run_turn(
@@ -320,7 +326,7 @@ async def test_roast_request_unknown_first_reply_no_search(
         memory_fakes, settings, tmp_db, monkeypatch):
     # Same gate for a roast request ("اشتم X"): bank bypassed, first
     # reply unknown — still no search, still no _SEARCH_EMPTY.
-    monkeypatch.setattr(h, "match_reply_bank", lambda *a, **k: None)
+    monkeypatch.setattr(h, "match_reply_bank_categorized", lambda *a, **k: None)
     grounding_calls = []
     router = ScriptedRouter([UNKNOWN_FIRST_REPLY])
     ctx, bot, msg, user = _run_turn(

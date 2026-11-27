@@ -368,6 +368,21 @@ class _RaisingRouter:
         raise RuntimeError("llm must not be called on this path")
 
 
+class _WovenRouter:
+    """v1.11: returns a woven reply containing the bank ingredient —
+    "والله العظيم يا عم، <line>، وكمان كلام من عندي حواليه." The
+    strong lazma keeps voice_check quiet, so no regeneration fires."""
+
+    def __init__(self, line):
+        self.line = line
+        self.calls = []
+
+    async def chat(self, messages, *a, **k):
+        self.calls.append(messages)
+        return (f"والله العظيم يا عم، {self.line}، وكمان كلام من عندي حواليه.",
+                "groq", 10)
+
+
 @pytest.fixture
 def _v12_settings():
     return Settings(telegram_bot_token="x", owner_id=OWNER_ID,
@@ -390,11 +405,11 @@ def _v12_memory(monkeypatch):
     monkeypatch.setattr("random.random", lambda: 0.99)  # no random voice
 
 
-def _v12_ctx(bot, settings):
+def _v12_ctx(bot, settings, router=None):
     return SimpleNamespace(
         bot=bot,
         application=SimpleNamespace(
-            bot_data={"settings": settings, "router": _RaisingRouter(),
+            bot_data={"settings": settings, "router": router or _RaisingRouter(),
                       "yt_requests": {}}))
 
 
@@ -416,14 +431,16 @@ def _stub_quota_ok(monkeypatch):
 async def test_handler_roast_member_gets_person_only_line(
         _v12_settings, _v12_memory, monkeypatch, tmp_db):
     """End to end: محمد is a cached member -> the bank roast line served
-    for "يا بهجت اشتم محمد" must be member-safe, never a family line."""
+    for "يا بهجت اشتم محمد" must be member-safe, never a family line.
+    v1.11: the line is an ingredient in the LLM turn, woven into a
+    fuller reply — never the whole reply alone."""
     _stub_quota_ok(monkeypatch)
     h._membership_cache[(CHAT_ID, 777)] = ("personal_only", time.time() + 600)
     monkeypatch.setattr(rb.random, "choice", lambda xs: xs[0])
     bot = _FakeStatusBot()
     bot.send_chat_action = AsyncMock()
     bot.get_chat_member = AsyncMock()
-    ctx = _v12_ctx(bot, _v12_settings)
+    ctx = _v12_ctx(bot, _v12_settings, _WovenRouter("فاشلين! فاشلين!"))
     user = _FakeUser(999, first_name="Test")
     msg = _FakeMessage("يا بهجت اشتم محمد", CHAT_ID, user)
     await h.on_group_message(_v12_update(msg, user), ctx)
@@ -432,24 +449,26 @@ async def test_handler_roast_member_gets_person_only_line(
     # First member-safe GENERIC roast line in file order: ro-01/02/03 are
     # family lines, ro-04..08 are target-specific (v1.3 targeting), so
     # the first line that fits target محمد is ro-09.
-    assert sent == "فاشلين! فاشلين!"
+    assert "فاشلين! فاشلين!" in sent and len(sent) > len("فاشلين! فاشلين!")
 
 
 async def test_handler_roast_non_member_may_serve_family_line(
         _v12_settings, _v12_memory, monkeypatch, tmp_db):
     """End to end: محمد cached as a NON-member -> the full roast pool,
-    including family-insult lines, is reachable through the handler."""
+    including family-insult lines, is reachable through the handler.
+    v1.11: the line is an ingredient in the LLM turn, woven into a
+    fuller reply — never the whole reply alone."""
     _stub_quota_ok(monkeypatch)
     h._membership_cache[(CHAT_ID, 777)] = ("full", time.time() + 600)
     monkeypatch.setattr(rb.random, "choice", lambda xs: xs[0])
     bot = _FakeStatusBot()
     bot.send_chat_action = AsyncMock()
     bot.get_chat_member = AsyncMock()
-    ctx = _v12_ctx(bot, _v12_settings)
+    ctx = _v12_ctx(bot, _v12_settings, _WovenRouter("يا ولد الوسخة"))
     user = _FakeUser(999, first_name="Test")
     msg = _FakeMessage("يا بهجت اشتم محمد", CHAT_ID, user)
     await h.on_group_message(_v12_update(msg, user), ctx)
     msg.reply_text.assert_called_once()
     sent = msg.reply_text.await_args.args[0]
     # First roast line in file order is a family-insult line (ro-01).
-    assert sent == "يا ولد الوسخة"
+    assert "يا ولد الوسخة" in sent and len(sent) > len("يا ولد الوسخة")

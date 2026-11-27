@@ -29,6 +29,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from conftest import WeavingRouter, ingredient_of_call
 
 import tg.handlers as h
 from brain import memory
@@ -536,38 +537,48 @@ def test_insulted_comeback_matches_situation(text, situation):
 
 async def test_live_insult_phrase_end_to_end(
         memory_fakes, settings, tmp_db, monkeypatch):
-    # The exact live phrase: bank comeback, no LLM call, no search,
-    # no status bubble, mood 30 -> 70 (called-dumb +40).
+    # The exact live phrase: v1.11 — the bank comeback is an
+    # INGREDIENT now, not a standalone reply: the LLM turn runs once,
+    # the system prompt carries the picked line in a [BANK LINE] block,
+    # and the final reply weaves the line into a fuller reply. Mood
+    # 30 -> 70 (called-dumb +40), no search, no status bubble.
     grounding_calls = []
     _grounding_stub(monkeypatch, grounding_calls)
-    router = ScriptedRouter(["مش عارف يا عم، يا غبي"])
+    router = WeavingRouter()
     ctx, bot, msg, user = await _run_turn(
         monkeypatch, settings, LIVE_INSULT, router, update_id=901)
-    assert router.calls == []
+    assert len(router.calls) == 1
     assert grounding_calls == []
     assert bot.sent_status == []
+    line = ingredient_of_call(router.calls[0])
+    assert line is not None, "no [BANK LINE] ingredient in the LLM call"
     final = msg.reply_text.await_args.args[0]
     assert final != h._SEARCH_EMPTY
     assert "ملقيتش حاجة" not in final
-    entry = _entry_for_line("insulted", final)
+    assert line in final and len(final) > len(line)
+    entry = _entry_for_line("insulted", line)
     assert "called-dumb" in (entry.get("situations") or [])
     assert memory_fakes["saved"][777]["mood"] == 70
 
 
 async def test_live_family_attack_end_to_end(
         memory_fakes, settings, tmp_db, monkeypatch):
-    # Family attack at the bot: comeback from the family-attacked pool,
-    # mood 30 -> 90 (+60), and the served line is still member-safe
-    # (the insulted pool never serves family lines at members).
+    # Family attack at the bot: v1.11 — the comeback from the
+    # family-attacked pool is an ingredient in the LLM turn, mood
+    # 30 -> 90 (+60), and the picked line is still member-safe (the
+    # insulted pool never serves family lines at members).
     grounding_calls = []
     _grounding_stub(monkeypatch, grounding_calls)
-    router = ScriptedRouter(["مش عارف يا عم، يا غبي"])
+    router = WeavingRouter()
     ctx, bot, msg, user = await _run_turn(
         monkeypatch, settings, LIVE_FAMILY_ATTACK, router, update_id=902)
-    assert router.calls == []
+    assert len(router.calls) == 1
     assert grounding_calls == []
+    line = ingredient_of_call(router.calls[0])
+    assert line is not None, "no [BANK LINE] ingredient in the LLM call"
     final = msg.reply_text.await_args.args[0]
-    entry = _entry_for_line("insulted", final)
+    assert line in final and len(final) > len(line)
+    entry = _entry_for_line("insulted", line)
     assert "family-attacked" in (entry.get("situations") or [])
     assert entry.get("member_safe", True) is not False
     assert memory_fakes["saved"][777]["mood"] == 90
@@ -576,11 +587,12 @@ async def test_live_family_attack_end_to_end(
 async def test_no_repeat_two_insults_get_different_comebacks(
         memory_fakes, settings, tmp_db, monkeypatch):
     # Same phrase twice in the same chat (two users, to dodge the 10s
-    # per-user pacing): the no-repeat window must serve two different
-    # lines from the same situation pool.
+    # per-user pacing): the no-repeat window must pick two different
+    # ingredient lines from the same situation pool — v1.11, the two
+    # LLM turns each carry a different [BANK LINE].
     grounding_calls = []
     _grounding_stub(monkeypatch, grounding_calls)
-    router = ScriptedRouter(["x", "y"])
+    router = WeavingRouter()
     _, _, msg1, _ = await _run_turn(
         monkeypatch, settings, "يا بهجت انت حمار", router,
         user_id=777, update_id=903)
@@ -590,25 +602,33 @@ async def test_no_repeat_two_insults_get_different_comebacks(
     r1 = msg1.reply_text.await_args.args[0]
     r2 = msg2.reply_text.await_args.args[0]
     assert r1 != r2
+    line1 = ingredient_of_call(router.calls[0])
+    line2 = ingredient_of_call(router.calls[1])
+    assert line1 is not None and line2 is not None
+    assert line1 != line2
     pool = {e["line"] for e in load_bank()["insulted"]
             if "called-dumb" in (e.get("situations") or [])}
-    assert r1 in pool and r2 in pool
-    assert router.calls == [] and grounding_calls == []
+    assert line1 in pool and line2 in pool
+    assert line1 in r1 and line2 in r2
+    assert len(router.calls) == 2 and grounding_calls == []
 
 
 async def test_roast_salah_handler_end_to_end(
         memory_fakes, settings, tmp_db, monkeypatch):
-    # "اشتم صلاح": bank roast, generic member-safe line only — no LLM,
-    # no search, never the Sisi Quran line.
+    # "اشتم صلاح": v1.11 — the bank roast is an ingredient in the LLM
+    # turn: generic member-safe line only, never the Sisi Quran line.
     grounding_calls = []
     _grounding_stub(monkeypatch, grounding_calls)
-    router = ScriptedRouter(["مش عارف يا عم، يا غبي"])
+    router = WeavingRouter()
     ctx, bot, msg, user = await _run_turn(
         monkeypatch, settings, LIVE_ROAST_SALAH, router, update_id=905)
-    assert router.calls == []
+    assert len(router.calls) == 1
     assert grounding_calls == []
+    line = ingredient_of_call(router.calls[0])
+    assert line is not None, "no [BANK LINE] ingredient in the LLM call"
     final = msg.reply_text.await_args.args[0]
-    entry = _entry_for_line("roast", final)
+    assert line in final and len(final) > len(line)
+    entry = _entry_for_line("roast", line)
     assert entry.get("target") is None
     assert entry.get("member_safe", True) is not False
     assert "القرآن" not in final
@@ -616,21 +636,25 @@ async def test_roast_salah_handler_end_to_end(
 
 async def test_roast_sisi_handler_end_to_end(
         memory_fakes, settings, tmp_db, monkeypatch):
-    # "اشتم السيسي": bank roast, Sisi-targeted or generic lines only.
-    # 30 fresh chats: at least one Sisi-targeted line must appear.
+    # "اشتم السيسي": v1.11 — the bank roast is an ingredient in the LLM
+    # turn: Sisi-targeted or generic lines only. 30 fresh chats: at
+    # least one Sisi-targeted ingredient must appear.
     grounding_calls = []
     _grounding_stub(monkeypatch, grounding_calls)
-    router = ScriptedRouter(["x"] * 40)
+    router = WeavingRouter()
     seen_targets = set()
     for i in range(30):
         ctx, bot, msg, user = await _run_turn(
             monkeypatch, settings, LIVE_ROAST_SISI, router,
             chat_id=CHAT_ID - i, user_id=9000 + i, update_id=910 + i)
+        line = ingredient_of_call(router.calls[i])
+        assert line is not None, "no [BANK LINE] ingredient in the LLM call"
         final = msg.reply_text.await_args.args[0]
-        entry = _entry_for_line("roast", final)
+        assert line in final and len(final) > len(line)
+        entry = _entry_for_line("roast", line)
         assert entry.get("target") in (None, "السيسي"), final
         seen_targets.add(entry.get("target"))
-    assert router.calls == []
+    assert len(router.calls) == 30
     assert grounding_calls == []
     assert "السيسي" in seen_targets
 

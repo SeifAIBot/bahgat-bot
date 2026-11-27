@@ -98,10 +98,16 @@ from brain import memory as _memory
 from brain import mood as _mood_mod
 from brain import prompt as _prompt_mod
 from brain.intent import detect_fast_reply, detect_insult_situation, detect_intent, detect_prefix_mode, looks_like_insult, looks_like_insult_turn, looks_like_opinion_ask, looks_stalling, looks_unknown
-from brain.reply_bank import looks_like_challenge, match_reply_bank
+from brain.reply_bank import (
+    INGREDIENT_CATEGORIES,
+    ingredient_in_reply,
+    is_standalone_line,
+    looks_like_challenge,
+    match_reply_bank_categorized,
+)
 from brain.memory import add_message, get_member, recent_messages, save_member
 from brain.mood import SITUATION_MOOD_BUMP, update_mood
-from brain.prompt import build_system_prompt, temperature_for
+from brain.prompt import bank_ingredient_block, build_system_prompt, temperature_for
 from brain.router import BrainRouter
 from brain.verify import check_reply, escape_html, split_message, voice_check
 from core import rules as _rules_mod
@@ -197,6 +203,17 @@ _SEARCH_FAILURE_LINES = (
 _VOICE_FAILURE_LINES = (
     "الصوت مش راضي يطلع دلوقتي، خد الرد كتابة وأجرب الصوت بعدين.",
     "المايك عندي واقع، اقرأها وأنا أظبطه.",
+)
+
+# v1.11: generic fallback when a bank-ingredient turn cannot produce a
+# woven reply — the picked line is NEVER sent alone, so if the final
+# draft is still just the line (after one firm retry), one of these
+# short in-character lines goes out instead. Deliberately generic:
+# no bank-line content, no family insult, nothing member-specific.
+_INGREDIENT_FALLBACK_LINES = (
+    "يا عم، خلاص، مش هرد عليك دلوقتي.",
+    "روح يا عم، الكلام ده مش داخل دماغي.",
+    "خلاص بقى، مش فاضي للهبل ده.",
 )
 
 
@@ -734,10 +751,14 @@ def _build_memory_block(member, mood: int) -> str:
     )
 
 
-def _build_system_prompt(member, mood, search_text, insult_level, target_name):
+def _build_system_prompt(member, mood, search_text, insult_level, target_name,
+                         bank_ingredient=None):
     """Try the v0.5 prompt signature, fall back to v0.4 and append the rule.
     The v0.5 prompt has no "owner" level, so the never-insult-Seif guardrail
-    is always appended here when the target is the owner."""
+    is always appended here when the target is the owner.
+    v1.11: bank_ingredient (a picked bank insult line) is forwarded so
+    the LLM weaves it into the reply; the fallback branches append the
+    same block by hand."""
     try:
         system = build_system_prompt(
             persona=_PERSONA,
@@ -747,6 +768,7 @@ def _build_system_prompt(member, mood, search_text, insult_level, target_name):
             style_examples=_EXAMPLES,
             insult_level=insult_level,
             target_name=target_name,
+            bank_ingredient=bank_ingredient,
         )
     except TypeError:
         try:
@@ -762,6 +784,8 @@ def _build_system_prompt(member, mood, search_text, insult_level, target_name):
             )
         elif insult_level != "owner":
             system += "\n[INSULT RULE] الهدف مش عضو في الجروب: حرية كاملة."
+        if bank_ingredient:
+            system += "\n" + bank_ingredient_block(bank_ingredient)
     if insult_level == "owner":
         name = target_name or "سيف"
         system += (
@@ -2040,14 +2064,20 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     cache_eligible = (
         intent_early == "just_chat" and not insulted_early and not grudge_early
     )
-    # v1.1 reply bank: Bahgat's REAL lines (persona/bahgat/reply_bank.yaml)
-    # beat the LLM for the highest-frequency persona moments (insult
-    # comebacks, jokes, his Sisi/takfir stance, challenges, greetings) —
-    # verbatim, instant, zero quota. Runs BEFORE the generic fast path so
-    # a real Bahgat line wins over a canned one. Only for just_chat /
-    # voice intents — a search or YouTube request is never hijacked by a
-    # bank line. Voice intents ("قول نكته") still go out as voice notes
-    # (same cooldown + text fallback as the main flow).
+    # v1.1 reply bank: Bahgat's REAL lines (persona/bahgat/reply_bank.yaml).
+    # v1.11 (Seif 2026-11-27): INSULT lines (insulted + roast) are
+    # INGREDIENTS, never standalone replies — a picked line is stashed
+    # and fed into the LLM turn below, which must weave it into the
+    # middle of a fuller reply. All pick filters still apply at pick
+    # time (member_safe, target, situation, no-repeat window), and the
+    # owner gates are untouched. The other categories (joke, greeting,
+    # opinion, condolence, challenge, dismiss) still go out verbatim —
+    # a joke, a stance, condolences, a greeting, a debate line or a
+    # two-word dismissal IS the reply's content. Only for just_chat /
+    # voice intents — a search or YouTube request is never hijacked by
+    # a bank line. Voice intents ("قول نكته") still go out as voice
+    # notes (same cooldown + text fallback as the main flow).
+    _bank_ingredient = None
     if intent_early in ("just_chat", "voice"):
         _rtm = getattr(msg, "reply_to_message", None)
         _rtu = getattr(_rtm, "from_user", None) if _rtm is not None else None
@@ -2079,7 +2109,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 _cached = _membership_cache.get((chat_id, int(_tid)))
                 if _cached and time.time() < _cached[1]:
                     _roast_member = _cached[0] == "personal_only"
-        bank = match_reply_bank(
+        bank_pick = match_reply_bank_categorized(
             text, chat_id=chat_id,
             is_owner=is_owner(user.id, settings.owner_id),
             is_reply_to_bot=_reply_to_bot,
@@ -2087,36 +2117,51 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             target_is_owner=_roast_owner,
             user_id=user.id,
         )
-        if bank is not None:
-            member_early["username"] = user.username or ""
-            member_early["first_name"] = user.first_name or ""
-            member_early["mood"] = mood_early
-            save_member(member_early)
-            add_message(chat_id, user.id, "user", text)
-            add_message(chat_id, context.bot.id, "assistant", bank)
-            logger.info(
-                "bank_path=true mood=%s user_id=%s chat_id=%s",
-                mood_early, user.id, chat_id,
-            )
-            _bank_voice = prefix_mode == "voice" and _decide_voice(
-                mood_early, True, False, len(bank))
-            _voice_key = (chat_id, user.id)
-            if _bank_voice and time.time() - _last_voice.get(_voice_key, 0) < _VOICE_COOLDOWN:
-                _bank_voice = False
-            if _bank_voice:
-                _sent = await _try_send_voice(msg, context, chat_id, bank)
-                if _sent:
-                    _last_voice[_voice_key] = time.time()
-                else:
-                    await _send_text(msg, bank + _voice_failure_note())
-            elif (prefix_mode == "voice" and len(bank) < 500
-                  and time.time() - _last_voice.get(_voice_key, 0) < _VOICE_COOLDOWN):
-                # Explicit "قول" downgraded by the pacing cooldown —
-                # say so instead of silently sending text.
-                await _send_text(msg, bank + _VOICE_COOLDOWN_NOTE)
+        if bank_pick is not None:
+            _bank_category, bank = bank_pick
+            if _bank_category in INGREDIENT_CATEGORIES:
+                # Ingredient: do NOT send, do NOT return — fall through
+                # to the LLM turn with the line stashed.
+                _bank_ingredient = bank
+                logger.info(
+                    "bank_ingredient=true category=%s mood=%s user_id=%s chat_id=%s",
+                    _bank_category, mood_early, user.id, chat_id,
+                )
             else:
-                await _send_text(msg, bank)
-            return
+                member_early["username"] = user.username or ""
+                member_early["first_name"] = user.first_name or ""
+                member_early["mood"] = mood_early
+                save_member(member_early)
+                add_message(chat_id, user.id, "user", text)
+                add_message(chat_id, context.bot.id, "assistant", bank)
+                logger.info(
+                    "bank_path=true mood=%s user_id=%s chat_id=%s",
+                    mood_early, user.id, chat_id,
+                )
+                _bank_voice = prefix_mode == "voice" and _decide_voice(
+                    mood_early, True, False, len(bank))
+                _voice_key = (chat_id, user.id)
+                if _bank_voice and time.time() - _last_voice.get(_voice_key, 0) < _VOICE_COOLDOWN:
+                    _bank_voice = False
+                if _bank_voice:
+                    _sent = await _try_send_voice(msg, context, chat_id, bank)
+                    if _sent:
+                        _last_voice[_voice_key] = time.time()
+                    else:
+                        await _send_text(msg, bank + _voice_failure_note())
+                elif (prefix_mode == "voice" and len(bank) < 500
+                      and time.time() - _last_voice.get(_voice_key, 0) < _VOICE_COOLDOWN):
+                    # Explicit "قول" downgraded by the pacing cooldown —
+                    # say so instead of silently sending text.
+                    await _send_text(msg, bank + _VOICE_COOLDOWN_NOTE)
+                else:
+                    await _send_text(msg, bank)
+                return
+    # v1.11: an ingredient turn must REACH the LLM — the fast path and
+    # the exact-match cache would answer without the line, and a cached
+    # reply could even be an old verbatim bank line.
+    if _bank_ingredient is not None:
+        cache_eligible = False
     # v1.0 fast path: trivial chat (greetings, thanks, acks, laughter,
     # bare "بهجت") gets an INSTANT local reply in Bahgat's voice — no
     # quota consumed, no LLM call, no status bubble, no search. The live
@@ -2315,7 +2360,8 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             search_ran = bool(search_text) and not search_text.startswith("[SEARCH FAILED]")
             await status.set_stage("thinking")
 
-        system = _build_system_prompt(member, member["mood"], search_text, insult_level, target_name)
+        system = _build_system_prompt(member, member["mood"], search_text, insult_level, target_name,
+                                      bank_ingredient=_bank_ingredient)
         memory_block = _build_memory_block(member, member["mood"])
         user_text = (text or "")[:1000]
         # v1.1: opinion questions get the stance note (see _OPINION_NOTE)
@@ -2373,7 +2419,8 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             search_text2 = await _search_grounding(_search_query(text, history))
             await status.set_stage("thinking")
             if search_text2 and not search_text2.startswith("[SEARCH FAILED]"):
-                system2 = _build_system_prompt(member, member["mood"], search_text2, insult_level, target_name)
+                system2 = _build_system_prompt(member, member["mood"], search_text2, insult_level, target_name,
+                                     bank_ingredient=_bank_ingredient)
                 messages2 = (
                     [{"role": "system", "content": system2}]
                     + history
@@ -2404,7 +2451,8 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             # found, say so plainly — in this turn, not "later".
             passages = _search_passages(search_text)
             if passages:
-                system2 = _build_system_prompt(member, member["mood"], search_text, insult_level, target_name)
+                system2 = _build_system_prompt(member, member["mood"], search_text, insult_level, target_name,
+                                     bank_ingredient=_bank_ingredient)
                 messages2 = (
                     [{"role": "system", "content": system2}]
                     + history
@@ -2468,6 +2516,44 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
                 )
                 if reply2.strip():
                     reply, provider = reply2, provider2
+
+        # v1.11: the picked bank insult line must be WOVEN into the
+        # reply, never sent alone. If the first draft lacks the line,
+        # one firm retry with the line repeated; if the final draft is
+        # still just the line (or barely more), a short generic line
+        # goes out instead — the line never stands alone as the reply.
+        # A draft that simply lacks the line is still sent: the rule
+        # forbids the line standing alone, not the absence of the line
+        # (the pick already rotated into the no-repeat window, so it
+        # will not repeat next turn either way). If the LLM call itself
+        # fails, the outer except sends _TURN_ERROR — the line never
+        # leaks through the error path either.
+        if _bank_ingredient is not None and not reply_is_fallback:
+            if not ingredient_in_reply(reply, _bank_ingredient):
+                logger.warning(
+                    "bank ingredient missing from draft; retrying once "
+                    "user_id=%s chat_id=%s", user.id, chat_id)
+                _ing_messages = list(messages) + [{
+                    "role": "user",
+                    "content": (
+                        "لازم الرد يحتوي السطر ده بالظبط في نصه: "
+                        f"\"{_bank_ingredient}\" — حطه في نص كلامك "
+                        "مش لوحده، وكمل حواليه كلام من عندك."
+                    ),
+                }]
+                reply2, provider2, _t2 = await _router_chat(
+                    router, _ing_messages, hard=False,
+                    temperature=temperature_for(intent),
+                    cheap_only=cheap_only, intent=intent,
+                )
+                if reply2.strip():
+                    reply, provider = reply2, provider2
+            if is_standalone_line(reply, _bank_ingredient):
+                logger.warning(
+                    "bank ingredient would stand alone; generic fallback "
+                    "user_id=%s chat_id=%s", user.id, chat_id)
+                reply = random.choice(_INGREDIENT_FALLBACK_LINES)
+                reply_is_fallback = True
 
         _ok, reply = _check_reply_guarded(reply, insult_level, settings.owner_id)
         if not reply.strip():

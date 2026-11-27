@@ -511,10 +511,12 @@ def _stub_quota_ok(monkeypatch):
     )
 
 
-async def test_bank_insult_gets_real_line_no_llm(
+async def test_bank_insult_llm_down_sends_error_not_line(
         _settings, _memory_fakes, monkeypatch, tmp_db):
-    """An insult at the bot gets a verbatim Bahgat comeback from the
-    bank — no LLM call, no quota, no bubble."""
+    """v1.11: an insult at the bot weaves a bank comeback into the LLM
+    reply — so with the LLM dead, the turn sends the plain error line
+    and NEVER the verbatim bank line alone (the ingredient must not
+    leak as a standalone reply)."""
     _stub_quota_ok(monkeypatch)
     bot = _FakeStatusBot()
     bot.send_chat_action = AsyncMock()
@@ -526,7 +528,8 @@ async def test_bank_insult_gets_real_line_no_llm(
     assert bot.sent == []  # no status bubble
     msg.reply_text.assert_called_once()
     sent = msg.reply_text.await_args.args[0]
-    assert sent in {e["line"] for e in load_bank()["insulted"]}
+    assert sent == h._TURN_ERROR
+    assert sent not in {e["line"] for e in load_bank()["insulted"]}
     msg.reply_voice.assert_not_called()
 
 

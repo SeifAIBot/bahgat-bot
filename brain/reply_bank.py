@@ -334,7 +334,65 @@ def _pick(
     return entry["line"]
 
 
-def match_reply_bank(
+# v1.11 (Seif 2026-11-27): bank INSULT lines (insulted + roast) are
+# INGREDIENTS, never standalone replies. When one is picked, the
+# handler feeds it into the LLM turn, which must weave the exact line
+# into the middle of a fuller, contextual reply — the line is never
+# sent verbatim on its own. All pick-time filters still apply
+# (member_safe, target-specificity, situation tags, no-repeat window),
+# and the owner gates below are untouched. The other categories
+# (joke_request, greeting, opinion_asked, condolence, challenge,
+# dismiss) stay verbatim: a joke, a stance, condolences, a greeting,
+# a debate line or a two-word dismissal IS the reply's content —
+# weaving it into longer text would dilute or distort it.
+
+# Categories whose picked line becomes an LLM ingredient (v1.11).
+INGREDIENT_CATEGORIES = frozenset({"insulted", "roast"})
+
+
+def ingredient_in_reply(reply: str, line: str) -> bool:
+    """True when the reply weaves the exact bank line in. Normalised
+    substring match first (alef/ة/ى variants match); if the model
+    reflowed the line slightly (extra word, different punctuation),
+    a word-subsequence check with >= 80% of the line's words in order
+    still counts — the point is the line is IN the reply, not that
+    every character survived."""
+    if not line or not reply:
+        return False
+    norm_reply = normalize_arabic(reply)
+    norm_line = normalize_arabic(line)
+    if norm_line and norm_line in norm_reply:
+        return True
+    words = [w for w in norm_line.split() if len(w) > 1]
+    if not words:
+        return False
+    reply_words = norm_reply.split()
+    matched = 0
+    pos = 0
+    for w in words:
+        try:
+            pos = reply_words.index(w, pos) + 1
+            matched += 1
+        except ValueError:
+            continue
+    return matched / len(words) >= 0.8
+
+
+def is_standalone_line(reply: str, line: str) -> bool:
+    """True when the reply IS the bank line (or barely more) — the
+    exact violation of the v1.11 rule. Normalised comparison; a reply
+    that adds fewer than 10 characters around the line still counts
+    as standalone (e.g. the line + \"يا عم\" is not a fuller reply)."""
+    if not line or not reply:
+        return False
+    norm_reply = normalize_arabic(reply).strip()
+    norm_line = normalize_arabic(line).strip()
+    if norm_reply == norm_line:
+        return True
+    return norm_line in norm_reply and len(norm_reply) - len(norm_line) < 10
+
+
+def match_reply_bank_categorized(
     text: str,
     *,
     chat_id: int,
@@ -343,8 +401,10 @@ def match_reply_bank(
     target_is_member: bool | None = None,
     target_is_owner: bool = False,
     user_id: int | None = None,
-) -> str | None:
-    """Return a verbatim Bahgat line for this message, or None.
+) -> tuple[str, str] | None:
+    """Like match_reply_bank, but returns (category, line) so the
+    caller knows whether the picked line is an ingredient (v1.11:
+    insulted/roast) or a verbatim reply (all other categories).
 
     Priority: insulted > roast > joke > opinion > condolence >
     challenge > greeting — a message carrying two signals
@@ -367,7 +427,7 @@ def match_reply_bank(
                      situation=detect_insult_situation(text),
                      user_id=user_id)
         if line is not None:
-            return line
+            return ("insulted", line)
 
     # Roast request ("اشتم X"): serve a roast line. Never at the owner,
     # never at the bot itself ("اشتم بهجت" goes to the LLM instead).
@@ -387,13 +447,13 @@ def match_reply_bank(
                 user_id=user_id,
             )
             if line is not None:
-                return line
+                return ("roast", line)
 
     # Joke request ("قول نكته" / "قولي نكته" / "هات نكته").
     if _has(t, _JOKE_WORDS):
         line = _pick("joke_request", chat_id)
         if line is not None:
-            return line
+            return ("joke_request", line)
 
     # Opinion: only Bahgat's own Sisi/takfir stance, only on that topic.
     # The lines are ABOUT a non-member subject, never about a group
@@ -401,25 +461,52 @@ def match_reply_bank(
     if looks_like_opinion_ask(text) and _has(t, _OPINION_TOPICS):
         line = _pick("opinion_asked", chat_id, member_safe_only=False)
         if line is not None:
-            return line
+            return ("opinion_asked", line)
 
     # Condolence: someone died ("مات", "توفي", "البقاء لله" ...).
     if _has(t, _CONDOLENCE_WORDS):
         line = _pick("condolence", chat_id)
         if line is not None:
-            return line
+            return ("condolence", line)
 
     # Challenge / argument: dismiss or answer back. Never at the owner.
     if not is_owner and _has(t, _CHALLENGE_WORDS):
-        line = _pick("challenge", chat_id) or _pick("dismiss", chat_id)
+        line = _pick("challenge", chat_id)
         if line is not None:
-            return line
+            return ("challenge", line)
+        line = _pick("dismiss", chat_id)
+        if line is not None:
+            return ("dismiss", line)
 
     # Greeting: short message only, so "اهلا يا بهجت انت حمار" (long,
     # insult) never lands here — the insult branch above already won.
     if len(words) <= 3 and _has(t, _GREETING_WORDS):
         line = _pick("greeting", chat_id)
         if line is not None:
-            return line
+            return ("greeting", line)
 
     return None
+
+
+def match_reply_bank(
+    text: str,
+    *,
+    chat_id: int,
+    is_owner: bool = False,
+    is_reply_to_bot: bool = False,
+    target_is_member: bool | None = None,
+    target_is_owner: bool = False,
+    user_id: int | None = None,
+) -> str | None:
+    """Return a bank line for this message, or None. Thin wrapper over
+    match_reply_bank_categorized — kept so existing callers and tests
+    keep working. NOTE (v1.11): a returned insulted/roast line is an
+    INGREDIENT, not a standalone reply — the handler must weave it
+    into an LLM reply (see INGREDIENT_CATEGORIES)."""
+    pick = match_reply_bank_categorized(
+        text, chat_id=chat_id, is_owner=is_owner,
+        is_reply_to_bot=is_reply_to_bot,
+        target_is_member=target_is_member,
+        target_is_owner=target_is_owner, user_id=user_id,
+    )
+    return pick[1] if pick is not None else None

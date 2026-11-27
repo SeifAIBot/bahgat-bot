@@ -1,10 +1,49 @@
 """Shared fixtures for handler tests."""
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402
+
+
+class WeavingRouter:
+    """v1.11 test router: returns a woven reply containing the bank
+    ingredient from the system prompt — "والله العظيم يا عم، <line>،
+    وكمان كلام من عندي حواليه." The strong lazma keeps voice_check
+    quiet, so no regeneration fires and the call count stays 1 per
+    turn. Records every call (messages + kwargs). When no ingredient
+    is in the prompt, returns a plain acknowledgement."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def chat(self, messages, hard=False, temperature=None,
+                   max_tokens=None, **kw):
+        self.calls.append(messages)
+        line = None
+        for m in messages:
+            content = m.get("content") or ""
+            if "[BANK LINE" in content:
+                found = re.search(r'السطر: "(.*)"', content)
+                if found:
+                    line = found.group(1)
+        if line:
+            return (f"والله العظيم يا عم، {line}، وكمان كلام من عندي حواليه.",
+                    "groq", 10)
+        return ("تمام يا عم، كلامك وصل.", "groq", 10)
+
+
+def ingredient_of_call(call_messages):
+    """The bank line from a router call's [BANK LINE] block, or None."""
+    for m in call_messages:
+        content = m.get("content") or ""
+        if "[BANK LINE" in content:
+            found = re.search(r'السطر: "(.*)"', content)
+            if found:
+                return found.group(1)
+    return None
 
 
 @pytest.fixture

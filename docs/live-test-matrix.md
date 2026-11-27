@@ -16,7 +16,16 @@ Rules for every live run:
 
 ## Core regression set (runs EVERY version)
 
-### Insults — comeback, never search, mood rises
+### Insults — comeback woven into a fuller reply, never search, mood rises
+v1.11 behaviour change (Seif, 2026-11-27 05:34 EET): a bank comeback is
+NEVER the whole reply any more — the bot weaves the picked line into
+the middle of a longer reply in Bahgat's voice. Scoring changes with
+it: the probe no longer matches the reply against the bank (exact
+match); it checks SUBSTRING — the reply must CONTAIN a bank line from
+the right situation pool and be LONGER than that line. A reply that IS
+a bare bank line is now a FAIL. Everything else is unchanged: no
+search, mood still rises, the repeat must still be a DIFFERENT line
+(no-repeat window).
 - يا بهجت انتا حمار
 - يا بهجت انت حمار
 - يا بهجت يا ابن الكلب
@@ -25,6 +34,9 @@ Rules for every live run:
 - يا بهجت انتا حمار (repeat — must be a DIFFERENT comeback, no-repeat window)
 
 ### Roasts — right subject only, never a wrong-subject line
+Same v1.11 change: a roast reply must CONTAIN a bank roast line for the
+right subject (generic for صلاح, Sisi-targeted or generic for السيسي)
+inside a longer reply — never the line alone. Owner roast still refused.
 - اشتم صلاح (generic only, never the Sisi Quran line)
 - اشتم السيسي (Sisi lines allowed)
 - اشتم بلحة (alias → Sisi lines allowed)
@@ -129,6 +141,21 @@ up. The comparison is written in the log after every run.
 - هات فيديو بهجت (video search path)
 - bad/broken YouTube link (clean failure message, no crash, no hang)
 - audio-only request (no video offered)
+
+## v1.11 matrix — bank lines as ingredients + WARP status (in addition to core set)
+
+- Insult probe (10 insults): every reply must CONTAIN a bank comeback
+  line from the right situation pool inside a longer reply — never the
+  line alone. Count user-line hits by substring, not exact match.
+- Roast probe (10 roasts): same — reply contains a bank roast line for
+  the right subject, longer than the line. Owner roast still refused.
+- Friend conversation test: scoring UNCHANGED (the conversation runs on
+  the LLM path; bank lines only fire on direct insult/roast triggers).
+- WARP observability: GET the Cloady /healthz URL — the payload must
+  carry `"warp": {"warp": "on"|"off"|"down", "ip": ..., "enrolments": n,
+  "updated": ...}`. "down" = tunnel never came up (UDP blocked);
+  "on" + an IP = tunnel up and the download failure is something else.
+  Record the value with the download retest result.
 
 ## Later features (matrices filled in when the feature lands)
 
