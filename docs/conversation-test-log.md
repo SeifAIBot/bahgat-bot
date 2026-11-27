@@ -149,3 +149,29 @@ never admits bot, never a banned AI phrase? voice when apt?
   tokens. Fix: raise the cap for reasoning families +
   treat finish_reason=length as retry/continue, never send
   a truncated draft as-is.
+
+### v1.13 — conversation test, 2026-11-27 09:02–09:13 EET, DONE
+
+- 8/8 replied, all text, delays 17–48 s. No voice notes.
+  Follow-up riffs 4/8 (messages 2, 4, 6, 8) — meets the
+  at-least-half bar exactly (same as v1.12).
+- Topics used (do NOT reuse next run): boredom cure (Yehia Azzam /
+  Mahmoud Mahdi videos); childhood window-breaking story; fear deep
+  question ("انت خايف من ايه أكتر حاجة في حياتك؟"); best Egyptian
+  player right now; riffs (video cure, window story, fear answer,
+  no-player-no-fear close).
+- Human-like: the story answer is a real anecdote (threw a stone,
+  broke the window, cried over the glass); the opinion answer takes a
+  real stance (no Egyptian player is best; Salah is trash — in
+  character, and consistent with the persona's Salah contempt).
+- Bot-tells: deep question dodged a FIFTH run in a row ("أنا مش خايف
+  من حاجة في حياتي" + insult deflection, then doubles down when
+  pressed — the v1.13 deep-note did not change the behaviour; the
+  persona's "brave/fearless" trait may be the override). NEW artifact:
+  script-mixing — reply 4 contains a Cyrillic "б" inside "عبيط".
+  Contradiction: reply 7 insults Salah ("زبل") while probe #4 in the
+  same run DEFLECTED on Salah ("الكلام ده مش داخل دماغي") — roast
+  behaviour is inconsistent across turns (provider/model variance).
+- Verdict vs v1.12: truncations FIXED (0/8 vs 3/8 — the cap raise +
+  length-retry works for conversation turns); follow-ups same (4/8);
+  deep dodge unchanged (5 runs running); voice still none.
