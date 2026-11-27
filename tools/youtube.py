@@ -16,7 +16,7 @@ Security (v0.5, Workstream A):
   RuntimeError (callers show an in-character failure) — never fake results.
 """
 import hashlib
-import json, re, subprocess, os, uuid, logging
+import json, re, subprocess, os, time, uuid, logging
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -107,51 +107,69 @@ def _run_yt_dlp(args: list[str], timeout: int) -> subprocess.CompletedProcess:
 # player API (resolve + download); search stays as-is, it works.
 _YT_PLAYER_CLIENT_ARGS = ["--extractor-args", "youtube:player_client=android"]
 
-# v1.3: the v1.1 Android fix is live on Cloady but downloads STILL fail
-# there (2026-11-26 19:56 EET: "يوتيوب رافض الطلب من السيرفر"), and the
-# check has since tightened in this VM too — plain android metadata went
-# 0/4 in the v1.3 probe (2026-11-26, yt-dlp 2026.11.23), while
-# android+player_skip=configs went 2/4 and was the ONLY variant that
-# produced a real download (Rick Astley dQw4w9WgXcQ: video 11,829,048
-# bytes mp4, audio 3,708,429 bytes mp3; Marwan Moussa 4Dp4z_MK_AU stayed
-# 0/5 across every variant). The check is INTERMITTENT — the same
-# command fails twice then succeeds — so every attempt below is an
-# independent ticket, and the chain rotates clients AND variants:
-#   1. android + player_skip=configs, primary format  (best variant found)
-#   2. android plain, primary format                 (v1.1 exact behaviour)
-#   3. ios + player_skip=configs, primary format
-#   4. web + player_skip=configs, primary format
-#   5. android + player_skip=configs, EXPLICIT format (18/best video,
-#      bestaudio/best audio — format 18 is the combined 360p mp4 the
-#      Android client actually serves; the SABR-only experiment hides
-#      some https formats, so naming 18 can succeed where the compound
-#      selector fails)
-#   6. cookies attempt (web client + --cookies) — ONLY when cookies are
-#      configured, and ONLY after 1–5 all fail. Cookies are the last
-#      resort; see _cookies_args().
+# v1.8: the v1.3 chain is live on Cloady but downloads STILL fail there —
+# video AND audio both bot-checked live 2026-11-27 (03:57 / 04:01 EET,
+# "يوتيوب رافض الطلب من السيرفر") — while the SAME chain works end to
+# end in this VM (Marwan Moussa El Kholasa: video OK 10.6s, audio OK
+# 18.6s). Root cause is the host, not the code: YouTube bot-checks
+# Cloady's datacenter IP; the cookies are valid to Dec 2027 and even
+# known-good cookies fail on the web client. Confirmed live 2026-11-27:
+# Waad (@D7Bot, added to the test group) downloads the SAME song fine
+# from another host (audio 3:19 / 2.3 MB and video, ~1s) — its files
+# carry an "@YYYYF" caption and a "بوت تحميل وعد" link, so they may
+# come through a backend service/files channel rather than direct
+# yt-dlp; that off-Cloady route is a FUTURE option, not this version.
+# So the chain is reordered and strengthened instead of debugged:
+#   pass 1: plain android FIRST (v1.8 VM probe: android+skip failed
+#     twice, plain android succeeded twice — the v1.3 order had the
+#     weaker variant first), then android+skip, ios+skip, web+skip.
+#   pass 2: the two android variants AGAIN, after a short sleep — the
+#     check is intermittent, so a later independent ticket can pass
+#     where the first was refused.
+#   tv with -f best: the tv client got a player response once where
+#     the web client was bot-checked.
+#   cookies attempt (web client + --cookies) LAST, only when cookies
+#     are configured — unchanged.
+# The v1.3 explicit-format attempt (android+skip+fmt18) is dropped:
+# its job (naming a format the client actually serves) is covered by
+# the tv+best attempt, and the second pass already re-tries android.
 # player_skip=configs is a real yt-dlp extractor arg in the installed
 # version (used in yt-dlp's own YouTube tests): it skips downloading
 # extra client configs, which is one of the requests the bot-check
-# bites on. Clients tv / mweb / tv_embedded were checked against the
-# installed version's INNERTUBE_CLIENTS: tv and mweb EXIST (both failed
-# the probe with a bot-check, so they are not in the chain);
+# bites on. Clients mweb / tv_embedded were checked against the
+# installed version's INNERTUBE_CLIENTS: tv and mweb EXIST (mweb
+# failed the v1.3 probe with a bot-check, so it is not in the chain);
 # tv_embedded does NOT exist (yt-dlp would warn "Skipping unsupported
 # client" and silently fall back to defaults — not a real fallback).
 # player_client and player_skip are passed as SEPARATE --extractor-args
 # flags (yt-dlp merges them; verified live in the VM) so that the argv
 # still contains the exact element "youtube:player_client=android"
 # that the v1.1 tests assert. Per-attempt timeouts bound the worst
-# case: download 180s x 6, resolve 45s x 5. A bot-check failure is fast
+# case: download 180s x 8, resolve 45s x 5. A bot-check failure is fast
 # (~5–20s); only a stalled transfer burns the full timeout.
 # Attempts are (label, player client, skip_configs, format override).
 _YT_NO_COOKIE_ATTEMPTS = (
-    ("android+skip=configs", "android", True, None),
     ("android", "android", False, None),
+    ("android+skip=configs", "android", True, None),
     ("ios+skip=configs", "ios", True, None),
     ("web+skip=configs", "web", True, None),
 )
 _YT_COOKIES_ATTEMPT = ("web+cookies", "web", True)
-_YT_EXPLICIT_FMT = {"video": "18/best", "audio": "bestaudio/best"}
+
+# v1.8: sleep between the two download passes so the retries are
+# independent tickets, not a burst at the same second. Tests patch this
+# to 0 (see test_youtube_fallbacks_v13.py).
+_RETRY_PASS_SLEEP_SECONDS = 5
+
+
+def _js_runtime_args() -> list[str]:
+    """--js-runtimes flags for web-client attempts (v1.8). yt-dlp
+    enables only deno by default and the Docker image ships node (see
+    Dockerfile), so a web attempt must name node explicitly or it runs
+    degraded (no JS runtime -> JS challenges unsolved -> bot-check).
+    --no-js-runtimes MUST come first: it clears the deno default
+    before node is enabled."""
+    return ["--no-js-runtimes", "--js-runtimes", "node"]
 
 
 def _player_client_cli(client: str, skip_configs: bool) -> list[str]:
@@ -379,11 +397,12 @@ def resolve_query(query: str, audio_only: bool = False) -> dict:
         if "://" in q or q.lower().startswith("http"):
             raise ValueError("only YouTube URLs are allowed; use a search query otherwise")
         base = ["--", f"ytsearch1:{q}"]
-    # v1.3: rotate player clients — the bot-check is intermittent, so a
-    # failure on one client is retried with the next (android+skip
-    # first, then plain android, ios, web). Cookies, if configured,
-    # are the last resort only (web client — the Android client takes
-    # no cookies, so yt-dlp skips it when cookies are passed).
+    # v1.8: rotate player clients — the bot-check is intermittent, so a
+    # failure on one client is retried with the next (plain android
+    # first, then android+skip, ios, web — v1.8 VM probe: plain android
+    # beat android+skip 2/2). Cookies, if configured, are the last
+    # resort only (web client — the Android client takes no cookies, so
+    # yt-dlp skips it when cookies are passed).
     attempts = [
         (label, client, skip, False)
         for label, client, skip, _ in _YT_NO_COOKIE_ATTEMPTS
@@ -396,11 +415,14 @@ def resolve_query(query: str, audio_only: bool = False) -> dict:
     for label, client, skip, use_cookies in attempts:
         cmd = ["yt-dlp", "--dump-single-json", "--no-download", "--no-playlist",
                *_player_client_cli(client, skip)]
+        if client == "web":
+            cmd += _js_runtime_args()
         if use_cookies:
             cmd += cookies
         cmd += base
         try:
             res = _run_yt_dlp(cmd, timeout=45)
+            logger.info("youtube resolve succeeded on attempt %s", label)
             break
         except RuntimeError as e:
             last_detail = str(e).removeprefix("yt-dlp failed: ").strip()
@@ -486,37 +508,46 @@ def download(url_or_query: str, audio_only: bool, out_dir: str | None = None) ->
     # taps failed live while search (no such flags) worked. Neither
     # flag does anything anyway: thumbnails/subs are only written when
     # --write-thumbnail/--write-subs is given.
-    # v1.3: the whole download is retried across the client chain
-    # (android+skip=configs → android → ios+skip → web+skip), then
-    # once more with the EXPLICIT format (18/best video, bestaudio/best
-    # audio — format 18 is the combined 360p mp4 Android actually
-    # serves), and only then — if cookies are configured — once with
-    # cookies (web client). No --cookies on the no-cookies attempts:
-    # cookies are the last resort. Each attempt is a fresh subprocess;
-    # the bot-check is intermittent, so a later attempt can pass where
-    # an earlier one was refused. On total failure the raised error
-    # names the attempt count and the LAST error's detail, so the
-    # owner hint stays accurate: a bot-check last error still maps to
-    # "يوتيوب رافض الطلب من السيرفر" (tg/handlers._download_error_hint),
-    # a different last error maps to its own hint — the "all attempts
-    # failed" prefix itself is the distinct marker for exhaustion in
-    # the host log, and it never claims a bot-check it didn't see.
-    kind = "audio" if audio_only else "video"
+    # v1.8: the whole download is retried across the client chain —
+    # pass 1 (plain android -> android+skip -> ios+skip -> web+skip),
+    # then, after a short sleep, pass 2 (the two android variants
+    # again), then tv with -f best, and only then — if cookies are
+    # configured — once with cookies (web client). No --cookies on the
+    # no-cookies attempts: cookies are the last resort. Each attempt is
+    # a fresh subprocess; the bot-check is intermittent, so a later
+    # attempt can pass where an earlier one was refused. On total
+    # failure the raised error names the attempt count and the LAST
+    # error's detail, so the owner hint stays accurate: a bot-check
+    # last error still maps to "يوتيوب رافض الطلب من السيرفر"
+    # (tg/handlers._download_error_hint), a different last error maps
+    # to its own hint — the "all attempts failed" prefix itself is the
+    # distinct marker for exhaustion in the host log, and it never
+    # claims a bot-check it didn't see.
     attempts = [
         (label, client, skip, None, False)
         for label, client, skip, _ in _YT_NO_COOKIE_ATTEMPTS
     ]
-    attempts.append(("android+skip=configs+fmt18", "android", True,
-                     _YT_EXPLICIT_FMT[kind], False))
+    pass2_start = len(attempts)
+    attempts += [
+        ("android-pass2", "android", False, None, False),
+        ("android+skip=configs-pass2", "android", True, None, False),
+    ]
+    attempts.append(("tv+best", "tv", False, "best", False))
     cookies = _cookies_args()
     if cookies:
         attempts.append((*_YT_COOKIES_ATTEMPT, None, True))
     last_detail = ""
     res = None
-    for label, client, skip, fmt_override, use_cookies in attempts:
+    for idx, (label, client, skip, fmt_override, use_cookies) in enumerate(attempts):
+        if idx == pass2_start:
+            # Short sleep between passes so the retries are independent
+            # tickets, not a burst at the same second.
+            time.sleep(_RETRY_PASS_SLEEP_SECONDS)
         attempt_fmt = fmt_override or fmt
         cmd = ["yt-dlp", "--no-playlist", "--max-filesize", "50M",
                *_player_client_cli(client, skip)]
+        if client == "web":
+            cmd += _js_runtime_args()
         if use_cookies:
             cmd += cookies
         cmd += ["-f", attempt_fmt, "-o", out, "--print", "after_move:filepath"]
@@ -525,6 +556,7 @@ def download(url_or_query: str, audio_only: bool, out_dir: str | None = None) ->
         cmd += ["--", url]
         try:
             res = _run_yt_dlp(cmd, timeout=180)
+            logger.info("youtube download succeeded on attempt %s", label)
             break
         except RuntimeError as e:
             last_detail = str(e).removeprefix("yt-dlp failed: ").strip()

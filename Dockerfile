@@ -4,7 +4,11 @@
 FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg nodejs && rm -rf /var/lib/apt/lists/*
+# nodejs is the yt-dlp JavaScript runtime (v1.8): yt-dlp enables only
+# deno by default, so without a runtime the web client runs degraded
+# (JS challenges unsolved -> bot-check). tools/youtube.py passes
+# --no-js-runtimes --js-runtimes node on web-client attempts.
 RUN groupadd -r app && useradd -r -g app app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

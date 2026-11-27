@@ -4,7 +4,7 @@ from brain.prompt import (
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "6.4"
+    assert PROMPT_VERSION == "6.5"
 
 
 def test_search_requires_citations():

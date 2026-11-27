@@ -4,7 +4,7 @@ the exception (Seif, live test 2026-11-26 19:53 EET: "مش اجريسف خالص
 creative).
 
 Probe set, asserted at the prompt/verify level (no LLM, no network):
-- the prompt (v6.4) states the savage default and keeps every hard rule;
+- the prompt (v6.5) states the savage default and keeps every hard rule;
 - voice_check bans soft/polite service replies on every turn, and bans
   ANY edgeless reply on a provoked turn (insult / challenge);
 - normal helpful answers (search results with citations, song lists)
@@ -31,8 +31,8 @@ def _reset_bank():
 
 # --- prompt: savagery is the default ------------------------------------------
 
-def test_prompt_version_is_6_4():
-    assert PROMPT_VERSION == "6.4"
+def test_prompt_version_is_6_5():
+    assert PROMPT_VERSION == "6.5"
 
 
 def test_system_base_states_savage_default():
@@ -45,7 +45,8 @@ def test_system_base_states_savage_default():
     for line in ("بيرد على الشتيمة بشتيمة أقوى", "عندك رأي في كل حاجة",
                  "متعتذرش، متقولش كنت بهزر", "لزماتك:"):
         assert line in SYSTEM_BASE
-    assert len(SYSTEM_BASE) < 1000
+    # v1.8: budget < 1100 for the identity line.
+    assert len(SYSTEM_BASE) < 1100
 
 
 def test_built_prompt_carries_savage_default():

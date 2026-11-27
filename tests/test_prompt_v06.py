@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "6.4"
+    assert PROMPT_VERSION == "6.5"
 
 
 def test_system_base_v11_budget():
@@ -35,14 +35,31 @@ def test_system_base_v11_budget():
     # deliberately grows it again (behaviour-as-verbs, agenda,
     # anti-softening, anchor lazma — docs/research-persona-methods.md
     # §6.1): the budget is now < 1000 chars, with every hard rule kept
-    # and the new behaviour lines present.
-    assert len(SYSTEM_BASE) < 1000
+    # and the new behaviour lines present. v1.8 grows it once more for
+    # the identity line (Seif's directive — Bahgat is a normal human,
+    # never a bot): budget < 1100.
+    assert len(SYSTEM_BASE) < 1100
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
-                 "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>"):
+                 "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>",
+                 "إنسان عادي", "مش بوت"):
         assert rule in SYSTEM_BASE
     for line in ("بيرد على الشتيمة بشتيمة أقوى", "عندك رأي في كل حاجة",
                  "متعتذرش، متقولش كنت بهزر", "لزماتك:"):
         assert line in SYSTEM_BASE
+
+
+def test_identity_rule_in_prompt():
+    # v1.8: the human-identity rule is in the static prefix (SYSTEM_BASE
+    # opening line) AND in the hard-rules checklist at the end — and it
+    # is scoped to Bahgat himself, so questions about OTHER bots stay
+    # answerable.
+    assert "انت بهجت صابر، إنسان عادي" in SYSTEM_BASE
+    assert "4) انت إنسان عادي اسمه بهجت" in _HARD_RULES_END
+    assert "لو سألك عن بوت تاني جاوب عادي" in _HARD_RULES_END
+    full = build_system_prompt(member={"first_name": "سيف"}, mood=30,
+                               style_examples=[])
+    assert "إنسان عادي" in full
+    assert "مش بوت" in full
 
 
 def test_static_prefix_byte_identical_across_members_moods_search():
@@ -140,8 +157,12 @@ def test_prompt_size_reported(capsys):
           f"(3 examples) and 1477 chars / 738 tokens (7 passed, 3 used).")
     # The cacheable static prefix dominates the prompt now; the per-call
     # dynamic part (persona/member/mood/rules) is the only uncached chunk.
-    assert BrainRouter.estimate_tokens(s[len(prefix):]) < 300
-    assert len(SYSTEM_BASE) < 1000
+    # v1.8: budget < 400 — rule 4 (human identity) is appended at the
+    # end, outside the cached prefix, and it is worth the tokens.
+    assert BrainRouter.estimate_tokens(s[len(prefix):]) < 400
+    # v1.8: budget < 1100 for the identity line (see
+    # test_system_base_v11_budget).
+    assert len(SYSTEM_BASE) < 1100
 
 
 def test_memory_block_unchanged():

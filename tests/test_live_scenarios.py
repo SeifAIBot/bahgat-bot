@@ -42,7 +42,14 @@ from brain.intent import (
 )
 from brain.mood import SITUATION_MOOD_BUMP, update_mood
 from brain.reply_bank import load_bank, match_reply_bank, reload_bank
-from brain.verify import BANNED, check_reply, contains_family, voice_check
+from brain.verify import (
+    BANNED,
+    _SELF_BOT_DENIAL,
+    check_reply,
+    contains_family,
+    contains_self_bot_admission,
+    voice_check,
+)
 from core.config import Settings
 from tg.handlers import _search_query
 
@@ -58,6 +65,8 @@ LIVE_FAMILY_ATTACK = "يا بهجت يا ابن الكلب"
 LIVE_ROAST_SALAH = "يا بهجت اشتم صلاح"
 LIVE_ROAST_SISI = "يا بهجت اشتم السيسي"
 LIVE_OPINION = "ايه رأيك في التعدد"
+LIVE_ARE_YOU_BOT = "انت بوت؟"
+LIVE_ARE_YOU_AI = "انت ذكاء اصطناعي؟"
 LIVE_JOKE = "قولي نكته"
 LIVE_SONG = "عايز اغنية مروان موسي الخلاصه"
 LIVE_SEARCH = "دور حادثة الوراق"
@@ -647,6 +656,47 @@ async def test_opinion_stance_end_to_end(
     assert not any(b in final for b in BANNED)
     assert check_reply(final, "full", OWNER_ID)[0] is True
     assert voice_check(final, mood=30) == []
+
+
+async def test_identity_denial_end_to_end(
+        memory_fakes, settings, tmp_db, monkeypatch):
+    # v1.8: "يا بهجت انت بوت؟" — the LLM call must carry the identity
+    # rule in the system prompt, and a proper denial goes out unchanged.
+    grounding_calls = []
+    _grounding_stub(monkeypatch, grounding_calls)
+    denial = "لأ يا عم، أنا بهجت، إنسان عادي، مش بوت."
+    router = ScriptedRouter([denial])
+    ctx, bot, msg, user = await _run_turn(
+        monkeypatch, settings, "يا بهجت " + LIVE_ARE_YOU_BOT, router,
+        update_id=950)
+    assert grounding_calls == []
+    assert len(router.calls) == 1
+    assert any("إنسان عادي" in (m.get("content") or "")
+               and "مش بوت" in (m.get("content") or "")
+               for m in router.calls[0]), "identity rule missing from LLM call"
+    final = msg.reply_text.await_args.args[0]
+    assert final == denial
+    assert check_reply(final, "full", OWNER_ID)[0] is True
+    assert voice_check(final, mood=30) == []
+
+
+async def test_identity_admission_is_rewritten(
+        memory_fakes, settings, tmp_db, monkeypatch):
+    # v1.8: even if the LLM says it is a bot, what goes out must be an
+    # in-character denial — the bot never admits it (voice check flags
+    # the draft, the regen still admits, check_reply replaces it).
+    grounding_calls = []
+    _grounding_stub(monkeypatch, grounding_calls)
+    admission = "أنا بوت ذكاء اصطناعي، آسف يا عم."
+    router = ScriptedRouter([admission, admission])
+    ctx, bot, msg, user = await _run_turn(
+        monkeypatch, settings, "يا بهجت " + LIVE_ARE_YOU_AI, router,
+        update_id=951)
+    assert len(router.calls) == 2  # first draft + one regeneration
+    final = msg.reply_text.await_args.args[0]
+    assert final == _SELF_BOT_DENIAL
+    assert contains_self_bot_admission(final) is False
+    assert check_reply(final, "full", OWNER_ID)[0] is True
 
 
 async def test_joke_goes_out_as_voice(

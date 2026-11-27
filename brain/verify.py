@@ -49,6 +49,35 @@ BANNED = ["كذكاء اصطناعي", "عذراً", "يسعدني مساعدت�
 FAMILY = ["امك", "أمك", "ابوك", "أبوك", "اهلك", "عيلتك", "امك ", "ابوك "]
 FUSHA = ["إنني", "سوف أقوم", "هل تريد", "عذراً"]
 
+# v1.8: self-bot admission — Bahgat must NEVER say HE is a bot/AI
+# (Seif's directive after the rival bot kept admitting it: Bahgat
+# considers himself a normal human). FIRST-PERSON ONLY, matched on
+# the normalised text (so alef/ة/ى variants match), so answers about
+# OTHER bots/people — "سعد ده بوت", "انت مش بني آدم" — pass untouched.
+# The bare word "بوت" is deliberately NOT here: it is only an
+# admission when the speaker applies it to himself.
+_SELF_BOT_PATTERNS = [
+    "انا بوت",
+    "انا ذكاء اصطناعي",
+    "انا مش بني ادم",
+    "انا مش انسان",
+    "انا برنامج",
+    "انا نموذج لغوي",
+]
+
+# In-character denial served when a reply admits being a bot: the
+# whole reply is replaced (a self-admission breaks the turn's stance,
+# it cannot be salvaged by word replacement). The denial passes its
+# own filter — it contains "مش بوت" but never "انا بوت".
+_SELF_BOT_DENIAL = "أنا بهجت يا عم، إنسان عادي، مش بوت."
+
+
+def contains_self_bot_admission(text: str) -> bool:
+    """True when the reply says the SPEAKER is a bot/AI. First-person
+    only — "سعد ده بوت" / "انت مش بني آدم" (about others) return False."""
+    t = normalize_arabic(text or "")
+    return any(p in t for p in _SELF_BOT_PATTERNS)
+
 _KEY_PATTERNS = [
     re.compile(r"sk-[A-Za-z0-9]{10,}"),
     re.compile(r"gsk_[A-Za-z0-9]{10,}"),
@@ -100,6 +129,10 @@ def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[b
       if nothing is left, substitute a neutral in-character line. Never
       append meta-commentary naming the owner or the rule.
     - Banned AI phrases: replaced as before.
+    - Self-bot admission ("أنا بوت" / "أنا ذكاء اصطناعي" / ... about
+      HIMSELF): the whole reply is replaced with an in-character denial
+      — the bot never sends a self-admission, even if the LLM produced
+      one. Answers about OTHER bots/people are untouched.
     - Leakage (owner id / prompt internals / key-like strings): the whole
       reply is replaced with a deflection.
     """
@@ -114,6 +147,9 @@ def check_reply(text: str, insult_level: str = "full", owner_id=None) -> tuple[b
         if b in cleaned:
             cleaned = cleaned.replace(b, "يا عم")
             ok = False
+    if contains_self_bot_admission(cleaned):
+        cleaned = _SELF_BOT_DENIAL
+        ok = False
     if _leaks(cleaned, owner_id):
         return False, _DEFLECTION
     return ok, cleaned
@@ -192,6 +228,11 @@ def voice_check(reply: str, mood: int = 0, provoked: bool = False) -> list[str]:
         flags.append("fusha_or_apology")
     if any(b in (reply or "") for b in BANNED):
         flags.append("ai_phrase")
+    if contains_self_bot_admission(reply or ""):
+        # v1.8: the bot admitting it is a bot is a persona failure —
+        # the handler regenerates once on flags, then check_reply
+        # replaces any surviving admission with the denial.
+        flags.append("self_bot_admission")
     # The v1.0 failure opened "بحس يا سيدي، دي نظريه بتقول..." — the
     # restatement sits mid-sentence, so this is a substring match, not
     # a startswith. Only runs on just_chat/voice turns (the handler
