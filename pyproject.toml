@@ -5,19 +5,4 @@ asyncio_mode = "auto"
 target-version = "py311"
 
 [tool.ruff.lint]
-# Classic default select only. Ruff 0.17's wider default flags the codebase's
-# pervasive `except Exception` style (BLE001) and more; enforcing that is a
-# separate cleanup, not this workstream. Keep CI green on real bugs.
 select = ["E4", "E7", "E9", "F"]
-
-[tool.ruff.lint.per-file-ignores]
-# Pre-existing violations in files owned by other workstreams / v0.4 — do not
-# fix by editing those files here; remove the ignore when the owner fixes it.
-"brain/prompt.py" = ["F841"]
-"core/persona.py" = ["E741"]
-"tests/test_insult_rules.py" = ["F401"]
-"tests/test_router.py" = ["E702"]
-"tests/test_router_v5.py" = ["F401"]
-"tools/search.py" = ["E401"]
-"tools/voice.py" = ["E401"]
-"tools/youtube.py" = ["E401", "E741"]

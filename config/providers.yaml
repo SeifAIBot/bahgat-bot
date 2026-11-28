@@ -1,198 +1,59 @@
-# Multi-LLM fallback — edit entries / order here, no code change.
-# Pool of DIFFERENT providers only, one key per provider. NEVER add a
-# second account / second project of the same provider to multiply its
-# quota — that violates providers' Terms of Service.
+# LLM fallback chain — edit entries / order here, no code change.
 #
-# Free-tier numbers below are the standing tiers as researched
-# 2026-11-25 (see docs/research-quota-providers.md). They churn
-# without warning (Mistral free API died Nov 2026, GitHub Models
-# retired Jul 2026) — RE-CHECK every number in each provider's own
-# console before relying on it, and re-check the Cerebras free-tier
-# question in particular: sources conflict (one says a permanent
-# 1M tokens/day free tier, another says it became a card-gated
-# $5 / 30-day trial in Oct 2026). The router disables Cerebras on
-# 401/403/404 and keeps going, so a dead tier costs nothing but
-# capacity. NVIDIA NIM trial terms say testing/evaluation only, NOT
-# production — NIM is an overflow tier, never the primary.
-# Gemini limits are per model per Google Cloud project; RPD resets
-# midnight Pacific. Groq limits are PER MODEL (200k TPD each), which
-# is why usage is tracked per (entry, model), not per provider.
+# bahgat/llm.py tries these top to bottom and uses the first provider that
+# answers with usable text. A failure (network, timeout, rate limit, empty
+# completion, content refusal) moves to the next entry; 401/403/404 means a
+# dead key or a retired model, so that entry is dropped for the rest of the
+# process run. Keys are read from env vars only, one key per provider.
+#
+# Do NOT add a second account / second project of the same provider to
+# multiply its quota — that breaks the providers' terms.
+#
+# v2.2 (expert review 2026-11-28, report in
+# research_notes/bahgat-instinct-adaptation-expert-review-20261128-0409/):
+# - Cerebras is NOT a permanent free tier ($5 / 30 days, card required) —
+#   removed. OpenRouter free is 20 RPM / 50 RPD — removed by owner call
+#   (skip both). gemma-4-31b-it is NOT a Gemini API model — removed.
+#   gemini-3-flash-preview is a legacy preview — replaced by the stable
+#   gemini-3.5-flash-lite as the Gemini entry. Groq limits are per model
+#   (30 RPM / 1,000 RPD / 8,000 TPM / 200,000 TPD), which is why Groq
+#   has three entries. NVIDIA NIM trial terms say testing/evaluation
+#   only — keep NIM as overflow, never the primary. Gemini per-model
+#   free RPM/RPD is NOT published — AI Studio is authoritative; treat
+#   Gemini as a spare, budget on Groq's published numbers.
 providers:
   - name: groq-20b
     family: groq
     model: openai/gpt-oss-20b
     base_url: https://api.groq.com/openai/v1
     env_key: GROQ_API_KEY
-    tier: simple
-    daily_cap_requests: 1000
-    daily_cap_tokens: 180000
-    rpm_guard_seconds: 0
-    timeout_seconds: 20
-    role: primary simple chat (fastest, cheapest per token)
+    timeout_seconds: 15
+    note: "primary — fastest of the three Groq models"
   - name: groq-120b
     family: groq
     model: openai/gpt-oss-120b
     base_url: https://api.groq.com/openai/v1
     env_key: GROQ_API_KEY
-    tier: hard
-    daily_cap_requests: 1000
-    daily_cap_tokens: 180000
-    rpm_guard_seconds: 0
-    timeout_seconds: 20
-    role: primary hard / search synthesis
+    timeout_seconds: 15
+    note: "strongest Groq model; second so hard turns still land fast"
   - name: groq-qwen
     family: groq
     model: qwen/qwen3.8-27b
     base_url: https://api.groq.com/openai/v1
     env_key: GROQ_API_KEY
-    tier: both
-    daily_cap_requests: 1000
-    daily_cap_tokens: 180000
-    rpm_guard_seconds: 0
-    timeout_seconds: 20
-    role: third Groq pool, strongest Arabic of the three; used after 20b (simple) / 120b (hard)
-  - name: cerebras-120b
-    family: cerebras
-    model: gpt-oss-120b
-    base_url: https://api.cerebras.ai/v1
-    env_key: CEREBRAS_API_KEY
-    tier: both
-    daily_cap_requests: 1000
-    daily_cap_tokens: 1000000
-    rpm_guard_seconds: 0
-    timeout_seconds: 20
-    role: fast 120b spare — FREE-TIER STATUS DISPUTED, see header; disabled on 401/403/404
-  - name: nvidia-nemotron
-    family: nvidia
-    model: nvidia/nemotron-3.5-super-vl-120b-a12b
-    base_url: https://integrate.api.nvidia.com/v1
-    env_key: NVIDIA_API_KEY
-    tier: both
-    daily_cap_requests: 10000
-    daily_cap_tokens: null
-    rpm_guard_seconds: 0
-    timeout_seconds: 30
-    role: overflow only — NIM trial terms say testing/evaluation only, not production. Model verified live 2026-11-25 (replied in Egyptian Arabic, 215 tokens); the previous nemotron-3-super-120b-a12b is RETIRED (HTTP 410 Gone). Do NOT use google/gemma-3-12b-it (404 on chat despite being listed) or nvidia/nemotron-3.5-lightning-30b-a3b (returns None content, reasoning-only with default params).
+    timeout_seconds: 15
+    note: "third Groq pool, strongest Arabic of the three (preview model)"
   - name: gemini-3.5-flash-lite
     family: gemini
     model: gemini-3.5-flash-lite
     base_url: https://generativelanguage.googleapis.com/v1beta/openai/
     env_key: GEMINI_API_KEY
-    tier: both
-    daily_cap_requests: 500
-    daily_cap_tokens: null
-    rpm_guard_seconds: 0
-    timeout_seconds: 30
-    role: Gemini workhorse, 500 RPD
-  - name: gemini-3.1-flash-lite
-    family: gemini
-    model: gemini-3.1-flash-lite
-    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
-    env_key: GEMINI_API_KEY
-    tier: both
-    daily_cap_requests: 500
-    daily_cap_tokens: null
-    rpm_guard_seconds: 0
-    timeout_seconds: 30
-    role: Gemini workhorse, 500 RPD
-  - name: gemini-gemma
-    family: gemini
-    model: gemma-4-31b-it
-    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
-    env_key: GEMINI_API_KEY
-    tier: both
-    daily_cap_requests: 14400
-    daily_cap_tokens: null
-    rpm_guard_seconds: 9
-    timeout_seconds: 30
-    role: bulk fallback — 14,400 RPD but TPM-bound (15,000 TPM), so the 9s rpm guard paces it
-  - name: gemini-3-flash-preview
-    family: gemini
-    model: gemini-3-flash-preview
-    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
-    env_key: GEMINI_API_KEY
-    tier: hard
-    daily_cap_requests: 20
-    daily_cap_tokens: null
-    rpm_guard_seconds: 0
-    timeout_seconds: 30
-    role: LAST resort only — 20 RPD is a rounding error, keep for the hardest questions
-  - name: openrouter-gemma
-    family: openrouter
-    model: google/gemma-4-31b-it:free
-    base_url: https://openrouter.ai/api/v1
-    env_key: OPENROUTER_API_KEY
-    tier: both
-    daily_cap_requests: 50
-    daily_cap_tokens: null
-    rpm_guard_seconds: 0
-    timeout_seconds: 30
-    role: emergency spare only — 50 RPD unfunded, cap is account-wide across all OpenRouter entries
-  - name: openrouter-nemotron
-    family: openrouter
-    model: nvidia/nemotron-3-super:free
-    base_url: https://openrouter.ai/api/v1
-    env_key: OPENROUTER_API_KEY
-    tier: both
-    daily_cap_requests: 50
-    daily_cap_tokens: null
-    rpm_guard_seconds: 0
-    timeout_seconds: 30
-    role: emergency spare only — 50 RPD unfunded, cap is account-wide across all OpenRouter entries
-
-# Output-token defaults per provider family, used when the caller does
-# not pass max_tokens (handlers pass 3000, which overrides per call).
-caps:
-  output_tokens:
-    groq: 3000
-    gemini: 4000
-    cerebras: 3000
-    nvidia: 3000
-    openrouter: 3000
-
-routing:
-  # Preference order within each tier; the router then reorders
-  # least-used-first (most remaining daily budget) with ties keeping
-  # this order. OpenRouter :free is last in both tiers.
-  max_retries_per_provider: 1
-  context_messages: 8
-  simple_order:
-    - groq-20b
-    - groq-qwen
-    - cerebras-120b
-    - nvidia-nemotron
-    - gemini-3.5-flash-lite
-    - gemini-3.1-flash-lite
-    - openrouter-gemma
-    - openrouter-nemotron
-  hard_order:
-    - groq-120b
-    - groq-qwen
-    - cerebras-120b
-    - gemini-3.5-flash-lite
-    - gemini-3.1-flash-lite
-    - gemini-gemma
-    - gemini-3-flash-preview
-    - openrouter-gemma
-    - openrouter-nemotron
-
-# v0.7 fair-share quota (docs/research-quota-fairshare.md). NO fixed
-# per-user or per-group reply numbers live here: capacity is computed
-# live from the provider caps above (brain.memory.compute_pool_remaining)
-# and divided among the ACTIVE users by weighted max-min fair sharing.
-# owner_weight 1.25 / member_weight 1.0; share = C * w / sum(w) over
-# active users (rolling 7-day window of bot triggers, minimum 1).
-# Below saturation_threshold of the pool used anyone may borrow up to
-# borrow_multiple x their share; at/above it each user is held to their
-# share. floor_replies: a user under the floor is never blocked by the
-# share check. planning_haircut: plan on 80% of the raw pool (free
-# tiers churn / 429 without warning). Mirrored as module-level defaults
-# in brain/memory.py (QUOTA_*), so memory works with no config passed.
-quota:
-  owner_weight: 1.25
-  member_weight: 1.0
-  active_window_days: 7
-  saturation_threshold: 0.50
-  borrow_multiple: 2.0
-  floor_replies: 20
-  planning_haircut: 0.20
+    timeout_seconds: 15
+    note: "Gemini entry — stable Lite model"
+  - name: nvidia-nemotron
+    family: nvidia
+    model: nvidia/nemotron-3.5-super-vl-120b-a12b
+    base_url: https://integrate.api.nvidia.com/v1
+    env_key: NVIDIA_API_KEY
+    timeout_seconds: 20
+    note: "overflow only (NIM trial terms: testing/evaluation). Model verified live 2026-11-25; the older nemotron-3-super-120b-a12b is retired (410 Gone)."

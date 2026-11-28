@@ -1,32 +1,7 @@
-# Secrets — NEVER commit real keys/tokens. .env.example (empty values) is safe.
 .env
-.env.*
-!.env.example
-# YouTube cookies files — NEVER commit. A cookies file holds a live
-# Google session for whoever exported it (v1.1: throwaway account only).
-cookies.txt
-*cookies*.txt
-*.cookies
-# Runtime state: SQLite DB, downloads, voice files, heartbeat.
-data/
-*.db
-*.db-wal
-*.db-shm
-downloads/
-voice/
-# Python / tooling caches.
+.venv/
 __pycache__/
 *.pyc
-.pytest_cache/
 .ruff_cache/
-.venv/
-# Logs and OS junk.
-*.log
-.DS_Store
-
-training/raw/
-training/work/
-training/samples/
-training/clean/
-training/curated/
-training/transcripts/
+data/
+.pytest_cache/

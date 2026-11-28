@@ -1,97 +1,146 @@
-# بهجت — Telegram Group Bot
+# Bahgat Bot
 
-Parody / fan roleplay bot for Telegram groups. Named **بهجت**, styled after Bahgat Saber: impulsive, says what's on his mind, swears a lot, funny, Egyptian dialect only. It is **not** the real Bahgat Saber.
+Telegram group bot: an Egyptian-dialect character in the style of the
+streamer Bahgat Saber — impulsive, funny, sarcastic, in Egyptian dialect.
+The Telegram account is labelled a bot in its bio ("بوت مصري بيهزر،
+وفخور إنه بوت."), and Telegram shows the official "Bot" tag; in chat he
+never admits he is a bot — he answers as a normal human. **That is the
+owner's explicit call (2026-11-28), and it is a known conflict with
+Telegram Bot Terms §5.2(c)-(d) on impersonation/misrepresentation —
+see CHANGELOG.md.**
 
-## What it does (v1)
-- Replies in groups only when mentioned, when someone says "بهجت", or when someone replies to its message.
-- Understands normal Egyptian talk — no slash commands. It decides itself if a request needs web search, YouTube, or voice.
-- Personal assistant in the group: web search (opens pages, summarises in Arabic), YouTube video or audio-only, voice notes.
-- Memory per member, mood that changes with what is said to it. If insulted, it gets angry and answers back like Bahgat — it does not laugh it off.
-- Owner-only control: only Seif (OWNER_ID) can control it, not any group admin.
-- Text first. Voice only when asked, when very angry, at random times, or when the topic is interesting.
-- If it does not know an answer, it searches the web first — it never says "مش عارف" and stops.
-- All replies in Bahgat's style, Egyptian dialect only, never Fusha, never generic AI phrases.
+**Not affiliated with, endorsed by, or representing the real Bahgat Saber.**
 
-## Insult rules (enforced in code, not just prompt)
-- Group member target: insult the person only. No father, mother, or family.
-- Non-member / fictional / public figure target: full freedom.
-- Owner (Seif) target: never insulted, ever.
-- Implemented in `tg/handlers.py`: the bot resolves the real insult target
-  (reply-to / @mention / named target matched against recent speakers) and
-  checks membership with `get_chat_member` (cached 10 min) before choosing
-  the level; the level is passed into the system prompt AND the post-check
-  in `brain/verify.py`.
+## What it does
 
-## Architecture — built for frequent updates
-Config-driven: handlers route, `brain/` decides, `tools/` execute.
-See `docs/ARCHITECTURE.md`. (`plugins/` exists but is a stub — its registry
-is never called from the pipeline; see ARCHITECTURE.md.)
+- Replies in a group only when @mentioned, addressed by name (بهجت /
+  بهجوتي), or replied to.
+- Chats in Egyptian dialect: short, impulsive, sarcastic, self-deprecating.
+- Web search (DuckDuckGo, no key) with numbered sources.
+- Songs/videos: YouTube search + metadata always; **one plain download
+  attempt** (current yt-dlp + PO-token provider; optional egress proxy via
+  `YTDLP_PROXY_URL`) — if the host's IP is blocked it says so in
+  character, hands over the link, and offers matches from permitted open
+  sources (Internet Archive / SoundCloud / Audius), clearly labelled as
+  different catalogues, not the same song.
+- Voice notes with a **generic TTS voice** (Edge TTS `ar-EG-ShakirNeural`)
+  by default; when `RVC_URL` points at a separate RVC worker, the voice
+  note is converted into the character's voice there, with Edge TTS as
+  the automatic fallback. RVC never runs inside this container.
+- `/about` — in character (no parody admission in chat).
+- `/stats` — owner-only LLM stats (success rate, p50/p95 latency,
+  fallbacks, bank fallbacks).
 
-```
-config/     persona.yaml, providers.yaml, rules.yaml — change behaviour without touching code
-core/       config loading, logging, errors, rules
-tg/         handlers only (routing) — no business logic here
-brain/      LLM router (multi-provider fallback), intent, memory, mood
-tools/      search, youtube, voice — each tool is swappable
-plugins/    stub, not wired into the pipeline yet (see docs/ARCHITECTURE.md)
-persona/    Bahgat style examples, catchphrases, mood triggers
-memory/     SQLite schema, per-member / per-group memory
-```
+## LLM providers
 
-Update policy:
-- Change persona/mood/rules → edit a YAML file, no code change, reload with `/reload` (owner only) or restart. (`/reload` re-reads `persona.yaml`, `examples.md`, `rules.yaml`; changing `providers.yaml` still needs a restart — the router reads it once at startup.)
-- Add a capability → currently a new function in `tools/` + a branch in `tg/handlers.py` + tests. (`plugins/` is not wired into the pipeline yet, so "new plugin folder + 1 line in config" does not work today.)
-- Change LLM provider/order → edit `config/providers.yaml` only, then restart.
-- Never hardcode tokens. All secrets in `.env` (see `.env.example`).
-- Every change gets a CHANGELOG entry and a test in `tests/`.
+One bot, several providers, tried in order. `config/providers.yaml` lists
+the chain (Groq 20b → Groq 120b → Groq qwen3.8-27b → Gemini 3.5-flash-lite
+→ NVIDIA Nemotron); `bahgat/llm.py` walks it and returns the first usable
+answer. A network error, timeout, rate limit (429), 5xx or a filtered
+answer moves on to the next provider; a 401/403/404 (dead key, retired
+model) drops that entry for the rest of the run, and a provider that fails
+twice in a row is cooled down for 10 minutes. One retry only, for
+429/5xx/timeout, honouring Retry-After. Each entry carries its own
+15 s timeout and the turn budget is ~30 s, so no turn hangs for minutes.
 
-## Free stack
-- Telegram Bot API — free
-- LLM: Groq first (gpt-oss-120b/20b, free tier) for everything; Gemini
-  (gemini-3-flash-preview) reserved for hard/search turns. Daily caps are
-  enforced in code before calling: Groq 150,000 tokens/day, Gemini 15
-  requests/day (see `/stats`, owner only). OpenRouter was removed in v0.4 —
-  no key was ever requested for it, so it never ran as a fallback.
-- Search: DuckDuckGo / Brave free search, page fetch + summarise.
-- YouTube: yt-dlp + ffmpeg, video (480p) or audio (mp3), Telegram 50 MB bot limit.
-- Voice: Edge TTS (free, Egyptian Arabic) first. RVC / GPT-SoVITS voice conversion to Bahgat's voice is a separate, later step — see `docs/voice-plan.md`. Exact 100% voice match is not promised.
+Fill a key for every provider you have; providers without a key are simply
+left out of the chain, and the bot needs at least one. There is no quota
+tracking, fair-share or telemetry database: the chain is the capacity
+plan, plus minimal counters (see /stats).
 
-## Run (local test)
+To change the order, edit the file. `LLM_CHAIN=groq-120b,gemini-3.5-flash-lite`
+overrides the order for one deployment, `LLM_PROVIDER=gemini` moves a family
+to the front (the rest still backs it up), and `LLM_MODEL` / `LLM_BASE_URL` /
+`LLM_API_KEY` retarget only the first entry.
+
+## Hard rules (enforced in code, `bahgat/rules.py`)
+
+- Insults are target-aware: at group members, person-only — never
+  parents, family or relatives. At non-members (resolved via reply /
+  @mention / getChatMember, fail-safe = member) and at named public
+  figures, the full range is allowed, including family insults.
+- The bank loader serves `member_safe: false` lines ONLY for a
+  positively resolved non-member target; a per-reply gate rejects any
+  reply carrying a family insult when the target is a member.
+- No slurs on religion, ethnicity, nationality or sect.
+- No sexual harassment. No real threats or incitement to harm.
+- Public figures may be roasted by name. Messi is defended, never
+  roasted; Sisi is insulted directly.
+- The owner is never insulted.
+- The bot never admits he is a bot (owner decision; see the note at the
+  top of this file).
+
+## Setup
+
 ```bash
-cp .env.example .env   # fill TELEGRAM_BOT_TOKEN, OWNER_ID, GEMINI_API_KEY, GROQ_API_KEY
-pip install -r requirements.txt
-python main.py
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env   # fill TELEGRAM_BOT_TOKEN, OWNER_ID and your LLM keys
+.venv/bin/python main.py
 ```
 
-## Deploy (free)
-Render Free tier for v1. Oracle Always Free VPS if the group gets big. See `docs/DEPLOY.md`.
+`ffmpeg` must be installed for voice notes. Env vars (see `.env.example`):
 
-## Privacy — where group data goes
-- Voice: Edge TTS is an unofficial, reverse-engineered Microsoft endpoint —
-  the text being voiced is sent to Microsoft. There is no official Azure
-  Speech key; if it blocks the bot, voice falls back to text.
-- Search: DuckDuckGo HTML scraping (spoofed browser User-Agent) + direct
-  page fetches. Fetched pages are treated as untrusted data, never as
-  instructions.
-- Storage: everything is SQLite (`data/bahgat.db`, WAL) on the host — members
-  (name, mood, notes, grudge), recent messages (last 200/chat), daily quota
-  counts, YouTube file-id cache. No vector DB, no external analytics.
-- Retention: `processed_updates` rows older than 48h are pruned at startup;
-  the bot deletes a chat's messages from the DB when it is removed from that
-  group; the owner can clear a member's memory with "امسح ذاكرة [name]".
-  Note the Render Free caveat in `docs/DEPLOY.md`: the DB file is wiped on
-  redeploy/restart, so memory/quota reset.
-- The bot's bio and its first message in a new group both say it is a
-  parody bot, not the real Bahgat Saber.
+| Var | Required | Purpose |
+| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | yes | BotFather token |
+| `OWNER_ID` | yes | owner's numeric Telegram ID (never insulted) |
+| `GROQ_API_KEY` | one of these | Groq key — three models in the chain |
+| `NVIDIA_API_KEY` | one of these | NVIDIA NIM key (trial terms: evaluation only) |
+| `GEMINI_API_KEY` | one of these | Google AI Studio key — gemini-3.5-flash-lite |
+| `LLM_CHAIN` | no | comma-separated entry/family names — overrides the chain order |
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` / `LLM_API_KEY` | no | move a family to the front / retarget the first entry |
+| `RVC_URL` | no | base URL of the separate RVC worker (empty = Edge TTS only) |
+| `YTDLP_PROXY_URL` | no | egress proxy for yt-dlp, e.g. WARP wireproxy (empty = direct) |
+| `YT_DLP_POT_PROVIDER_URL` | no | remote bgutil PO-token server (empty = local provider) |
+| `ALLOWED_CHAT_IDS` | no | comma-separated chat allowlist (empty = any group) |
+| `BAHGAT_DATA_DIR` | no | runtime state dir (default `./data`) |
+| `DROP_PENDING_UPDATES` | no | default `true` |
+| `PORT` | no | `/healthz` port (default 8080) |
 
-## Status
-- Scaffold: done
-- Token verified: @Bahgoti_bot, id 9106462211 (getMe, 2026-11-25)
-- Owner ID verified: 1415214630 (Seif)
-- Test group: invite link known (https://t.me/+RN2Fksh8-KU3NWI0); numeric
-  chat id not known yet — set `ALLOWED_CHAT_IDS` to it once known
-- Still waiting: Seif adding @Bahgoti_bot as admin to the test group
-  (privacy mode is ON, so plain "بهجت" messages are only delivered if the
-  bot is admin or privacy mode is disabled in BotFather)
-- Voice training dataset: see `docs/training-videos.md` — audio cleanliness NOT yet verified by listening
-- Not yet tested in a group. Do not deploy to the main group before private-group testing.
+## Deploy
+
+Any always-on host works. With Docker: `docker build -t bahgat-bot . &&
+docker run --env-file .env -v bahgat-data:/app/data bahgat-bot`.
+On a PaaS set `BAHGAT_DATA_DIR` to the persistent volume and `PORT` as
+injected; `/healthz` answers health checks.
+
+## Tests
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -q
+.venv/bin/python -m ruff check .
+```
+
+## Layout
+
+```
+main.py            entry point (logging + polling)
+bahgat/
+  config.py        env settings (incl. RVC_URL, YTDLP_PROXY_URL)
+  persona.py       the short stable system prompt, bio, in-character about
+  rules.py         red lines enforced in code on every reply
+  targets.py       target resolution (reply / @mention / sender) + membership
+  stats.py         minimal counters (LLM calls, fallbacks, bank fallbacks)
+  llm.py           LLM client: ordered multi-provider fallback chain
+  reply_bank.py    curated line bank loader + serving filter + no-repeat
+  media.py         YouTube (search/metadata/one download) + open-source fallback
+  search.py        DuckDuckGo web search + page fetch (SSRF-guarded)
+  voice.py         Edge TTS voice notes + RVC-worker seam (send_voice)
+  db.py            SQLite: recent messages + served-line window
+  health.py        /healthz endpoint
+  handlers/
+    chat.py        routing + LLM conversation + /stats (owner-only)
+    media.py       song/video flow
+    voice.py       voice-note flow
+config/
+  providers.yaml   the LLM chain: entries, models, key env vars, timeouts
+persona/
+  examples.md      few-shot style pairs (part of the system prompt)
+  reply_bank.yaml  curated lines (filtered at load: no family/religion/
+                   sexual/threat lines are served at members)
+tests/             pytest suite (no network, no real LLM)
+docs/live-test-log.md  live-test criteria + session log
+```
+
+Feature set is frozen at v2.2 (see CHANGELOG.md).
