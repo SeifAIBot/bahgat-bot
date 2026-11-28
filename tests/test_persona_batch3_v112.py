@@ -46,7 +46,7 @@ CHAT_ID = -100222
 
 def test_prompt_version_is_7_3():
     # v1.19: merged prompt D (ChatGPT deep/continuity + masculine-default + English ban; Claude mocking denial).
-    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
+    assert PROMPT_VERSION == "7.4"  # v1.20: Grok aggressive + religion exception
 
 
 # Row phrases for the batch-3 facts (brain/persona_facts.py) — the old

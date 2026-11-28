@@ -9,7 +9,7 @@ import re
 # are deliberately NOT in this list; they are caught only in the
 # insult-adjective pattern of _FAMILY_RE below.
 FAMILY_WORDS = ["امك", "ابوك", "اهلك", "عيلتك", "امكم", "ابوكم", "امها", "ابوها",
-                "امهم", "ابوهم", "امه", "ابوه"]
+                "امهم", "ابوهم", "امه", "ابوه", "كسمك", "كسك", "كسها", "كسهم"]
 
 # Insult nouns that make an "ابن X" / "يا ابن X" construction a family
 # insult (normalised form: ة -> ه, ى -> ي, أ -> ا). "يا ابن عمي" (cousin,

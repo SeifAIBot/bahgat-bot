@@ -32,7 +32,7 @@ def _reset_bank():
 # --- prompt: savagery is the default ------------------------------------------
 
 def test_prompt_version_is_7_0():
-    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
+    assert PROMPT_VERSION == "7.4"  # v1.20: Grok aggressive + religion exception
 
 
 def test_system_base_states_savage_default():

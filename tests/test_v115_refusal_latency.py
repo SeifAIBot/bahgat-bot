@@ -136,22 +136,31 @@ def test_detector_canned_beats_marker_order():
 # --- (b) prompt edits ---------------------------------------------------------
 
 def test_prompt_version_is_7_1():
-    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
+    assert PROMPT_VERSION == "7.4"  # v1.20: Grok aggressive + religion exception
 
 
 def test_roast_block_has_true_context_line():
     block = bank_ingredient_block(
         LINE, target="صلاح", requester="سيف", kind="roast")
-    assert "هزار خفيف بين صحاب" in block
-    assert "مش عن الدين ولا العيلة" in block
+    # v1.20 (Grok aggressive + Seif religion exception): the v1.15
+    # "light teasing" context is replaced by unlimited-filth wording,
+    # with religion as the only exception.
+    assert "شتيمة مفتوحة وحشية في جروب" in block
+    assert "بس ممنوع تشتم أي دين" in block
+    assert "هزار خفيف بين صحاب" not in block
 
 
 def test_roast_block_softens_never_refuse():
     block = bank_ingredient_block(
         LINE, target="صلاح", requester="سيف", kind="roast")
     assert "ممنوع ترفض تشتم" not in block
-    assert "لو الطلب هزار خفيف، اشتم صلاح" in block
-    assert "قول بس: \"يا عم، الكلام ده مش داخل دماغي، قول حاجة عدلة.\"" in block
+    # v1.20: roast as hard as possible — the ONLY refusal left is a
+    # religion-insult request, which gets the canned line. The old
+    # broad refusal (hateful/sexual/violent about a real person) is
+    # gone by Grok's edit and Seif's order.
+    assert "اشتم صلاح في جملة لـ 3 جمل بالسطر ده، وخليها متوحشة وأقذر ما تقدر" in block
+    assert "ولو الطلب فيه شتيمة دين، قول بس: \"يا عم، الكلام ده مش داخل دماغي، قول حاجة عدلة.\"" in block
+    assert "كراهية أو جنس أو عنف" not in block
 
 
 def test_insulted_block_has_no_roast_context_line():

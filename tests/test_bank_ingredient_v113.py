@@ -209,19 +209,21 @@ def test_weave_about_target(reply, target, requester, expected):
 
 
 def test_prompt_version_is_7_3():
-    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
+    assert PROMPT_VERSION == "7.4"  # v1.20: Grok aggressive + religion exception
 
 
 def test_bank_ingredient_block_roast_names_target_and_requester():
     block = bank_ingredient_block(
         "كنت بموت في عنيك", target="تامر", requester="سيف", kind="roast")
     assert "تامر" in block and "سيف" in block
-    # v1.15: the "never refuse" absolute is softened to a specific
-    # positive instruction + one line of true context (light teasing
-    # between friends; never religion/family/looks/hate).
-    assert "لو الطلب هزار خفيف، اشتم تامر" in block
-    assert "هزار خفيف بين صحاب" in block
-    assert "مش عن الدين ولا العيلة" in block
+    # v1.20 (Grok aggressive + Seif religion exception): the v1.15
+    # "light teasing" context is gone — the roast is unlimited filth
+    # now, and the ONLY refusal left is a religion-insult request.
+    assert "اشتم تامر في جملة لـ 3 جمل بالسطر ده، وخليها متوحشة وأقذر ما تقدر" in block
+    assert "شتيمة مفتوحة وحشية في جروب" in block
+    assert "بس ممنوع تشتم أي دين" in block
+    assert "ولو الطلب فيه شتيمة دين، قول بس:" in block
+    assert "هزار خفيف بين صحاب" not in block
     assert "ممنوع ترفض تشتم تامر" not in block
     assert "متشتموش هو" in block
     assert "من غير علامات تنسيق" in block

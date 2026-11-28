@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
+    assert PROMPT_VERSION == "7.4"  # v1.20: Grok aggressive + religion exception
 
 
 def test_system_base_v11_budget():
@@ -52,7 +52,10 @@ def test_system_base_v11_budget():
     # continuity sections, masculine-default, English ban, bank-weave rule;
     # Claude mocking denial in rule 4; hard rules 5 → 9): budget < 2400.
     # A/B 7-3 vs 7.1 (prompt-ab/verdict-merged-2026-11-28.md).
-    assert len(SYSTEM_BASE) < 2400
+    # v1.20 grows it once more for Grok's aggressive prompt (hardened
+    # style, member rule +كسمك, new hard rule 8; hard rules 9 → 10)
+    # + Seif's religion exception: budget < 2700 (measured 2565).
+    assert len(SYSTEM_BASE) < 2700
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
                  "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>",
                  "إنسان عادي", "مش بوت"):
@@ -116,7 +119,7 @@ def test_hard_rules_in_static_prefix_and_at_end():
     prefix = s.split("[PERSONA CONFIG]")[0]
     assert _HARD_RULES_END in prefix
     assert s.rstrip().endswith(_HARD_RULES_END)
-    tail = s[-800:]  # v1.19: hard rules are 9 now (731 chars), not 5
+    tail = s[-1000:]  # v1.20: hard rules are 10 now (849 chars), not 9 — the 800-char window no longer reaches rule 1
     assert "عامية مصرية" in tail
     assert "متخترعش" in tail
 
@@ -192,7 +195,9 @@ def test_prompt_size_reported(capsys):
     # v1.19: budget < 600 — rules 6–9 (deep, continuity,
     # masculine-default, bank-weave) are appended at the end, outside
     # the cached prefix, and are worth the tokens (same reasoning).
-    assert BrainRouter.estimate_tokens(s[len(prefix):]) < 600
+    # v1.20: budget < 650 — Grok's new hard rule 8 (+ religion
+    # exception) is appended at the end too (measured 624).
+    assert BrainRouter.estimate_tokens(s[len(prefix):]) < 650
     # v1.8: budget < 1100 for the identity line (see
     # test_system_base_v11_budget). v1.12: budget < 1800 for the
     # football + religion identity blocks. v1.12 expansion: < 2800
@@ -200,7 +205,8 @@ def test_prompt_size_reported(capsys):
     # tech tastes, temperament and mockery targets block. v1.14:
     # facts atomised out of SYSTEM_BASE (brain/persona_facts.py) —
     # budget < 1800 again. v1.19: merged prompt — budget < 2400.
-    assert len(SYSTEM_BASE) < 2400
+    # v1.20: Grok aggressive + religion exception — budget < 2700.
+    assert len(SYSTEM_BASE) < 2700
 
 
 def test_memory_block_unchanged():

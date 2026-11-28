@@ -8,8 +8,11 @@ from core.rules import (
 
 
 def test_family_words_canonical_deduped_normalised():
+    # v1.20 (Grok): كس-anchored family words added — the old list could
+    # not catch "كسمك" at all (the W.W.3 hole: "كسمك انت يا أيمن"
+    # reached a member).
     assert FAMILY_WORDS == ["امك", "ابوك", "اهلك", "عيلتك", "امكم", "ابوكم", "امها", "ابوها",
-                            "امهم", "ابوهم", "امه", "ابوه"]
+                            "امهم", "ابوهم", "امه", "ابوه", "كسمك", "كسك", "كسها", "كسهم"]
     assert len(FAMILY_WORDS) == len(set(FAMILY_WORDS))
 
 
@@ -18,6 +21,19 @@ def test_normalize_arabic():
     assert normalize_arabic("أُمّك   أَبوك") == "امك ابوك"
     assert normalize_arabic("عيلـتك") == "عيلتك"  # tatweel stripped
     assert normalize_arabic("  كلام   كتير  ") == "كلام كتير"
+
+
+def test_contains_family_insult_detects_kasm_words_v120():
+    # v1.20 (Grok): the كس-anchored possessives are family insults
+    # (كس + امك/ك/ها/هم) and must be caught — plain, with diacritics,
+    # and in the exact W.W.3 sentence that slipped through before.
+    assert contains_family_insult("كسمك")
+    assert contains_family_insult("كسك")
+    assert contains_family_insult("كسها")
+    assert contains_family_insult("كسهم")
+    assert contains_family_insult("كسمك انت يا أيمن")
+    assert contains_family_insult("كس أمك")  # spaced form, via امك
+    assert contains_family_insult("كَسْمَك")  # diacritics stripped
 
 
 def test_contains_family_insult_detects():
