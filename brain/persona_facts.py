@@ -49,7 +49,7 @@ FACTS = [
     {"id": "f02", "topic": "food", "polarity": "love",
      "text": "محشي", "keys": ["محشي"]},
     {"id": "f03", "topic": "food", "polarity": "hate",
-     "text": "بفتيك", "keys": ["بفتيك"]},
+     "text": "بفتيك", "keys": ["بفتيك", "بوفتيك"]},
     {"id": "f04", "topic": "food", "polarity": "hate",
      "text": "خضار طبيخ", "keys": ["خضار"]},
     {"id": "f05", "topic": "food", "polarity": "hate",
@@ -248,7 +248,7 @@ _TOPIC_LABELS = {
 # Verb forms are listed explicitly ("تاكل" / "هاكل" are not "اكل").
 _TOPIC_KEYWORDS = {
     "food": ["اكل", "تاكل", "بتاكل", "هاكل", "هتاكل", "مكرونه",
-             "بشاميل", "محشي", "بفتيك", "فسيخ", "رنجه", "خضار"],
+             "بشاميل", "محشي", "بفتيك", "بوفتيك", "فسيخ", "رنجه", "خضار"],
     "football": ["كوره", "كره", "اهلي", "زمالك", "منتخب", "صلاح",
                  "ميسي", "رونالدو", "كريستيانو", "مبابي", "فينيسيوس",
                  "رودريجو", "تريكه", "حسام", "ريال", "مدريد",
@@ -388,6 +388,12 @@ def select_facts(user_text):
     else:
         polarity = None
     rows = [f for f in FACTS if f["topic"] == topic]
+    # Named-side narrowing (v1.14 boftik trap + v1.18 opinion
+    # wording): when the message carries a love/hate verb AND names
+    # items from the opposite polarity only, flip to the named side;
+    # when it names items from BOTH sides, drop the polarity (whole
+    # topic slice) so the post-filter cannot eat the denial either
+    # way.
     if polarity is not None:
         # v1.16 — the boftik trap (live v1.14 probe #6): "بتحب
         # البفتيك؟" names a HATE item while the verb says love, so
@@ -407,6 +413,29 @@ def select_facts(user_text):
             polarity = opposite
         elif named[opposite] and named[polarity]:
             polarity = None
+    elif topic == "food":
+        # v1.18 — opinion wording with no verb ("ايه رأيك في
+        # البوفتيك؟"): the v1.17 live probe got the whole slice and
+        # the model answered neutrally ("البوفتيك أكلة عادية").
+        # Food-only, deliberately: food rows are bare item names
+        # (no neutral/trait rows, single-word keys), so naming one
+        # item IS asking about that item — narrowing to its side is
+        # the correct reading. Other topics keep the v1.14 whole-
+        # slice contract: their rows are POSITIONS with nuance
+        # (love Ahly + hate the board; the Jerusalem stance is a
+        # neutral row), and the whole slice is what the model needs
+        # to hold them — narrowing there DROPS the neutral rows and
+        # the other side (live v1.18 regression: Messi opinion,
+        # Treika+Salah, Ahly board, Palestine all lost rows).
+        named = {}
+        for pol in ("love", "hate"):
+            named[pol] = any(
+                _names_item(t, f.get("keys") or [])
+                for f in rows if f["polarity"] == pol)
+        if named["hate"] and not named["love"]:
+            polarity = "hate"
+        elif named["love"] and not named["hate"]:
+            polarity = "love"
     if polarity is not None:
         sliced = [f for f in rows if f["polarity"] == polarity]
         if sliced:

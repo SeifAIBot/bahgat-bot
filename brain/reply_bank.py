@@ -627,13 +627,35 @@ def is_canned_deflection(reply: str) -> bool:
 _REGRET_REPLY_WORDS = ("ندم", "ندمت", "ندمان", "ضيعت", "سنين")
 
 
-def is_regret_evasion(reply: str) -> bool:
+def _bare_question(text: str) -> str:
+    """A question stripped to its content words for echo comparison
+    (v1.18): the "يا بهجت" trigger and all punctuation collapse to
+    single spaces, so a reply restating the question matches even
+    with different punctuation."""
+    t = normalize_arabic(text or "").strip()
+    for trig in ("يا بهجت", "بهجت"):
+        if t.startswith(trig):
+            t = t[len(trig):].strip()
+            break
+    return re.sub(r"[\s.!؟،,;:]+", " ", t).strip()
+
+
+def is_regret_evasion(reply: str, question: str | None = None) -> bool:
     """True when a reply to a regret question dodges it instead of
-    answering sincerely."""
+    answering sincerely. When the question is given, echoing it back
+    verbatim counts as an evasion too (v1.18, live v1.17 Task B #8:
+    "لو رجع بيك الزمن كنت هتغير ايه؟" got the question echoed +
+    a generic line). A sincere answer never restates the whole
+    question, so the comparison is safe."""
     if not reply or not reply.strip():
         return True
     if is_canned_deflection(reply):
         return True
+    if question:
+        bare_q = _bare_question(question)
+        bare_r = _bare_question(reply)
+        if bare_q and bare_q in bare_r:
+            return True
     norm = normalize_arabic(reply).strip(" .!؟،,;:\n\t")
     dismiss_lines = {
         normalize_arabic(e["line"]).strip(" .!؟،,;:\n\t")

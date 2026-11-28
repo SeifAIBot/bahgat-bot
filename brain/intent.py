@@ -663,6 +663,11 @@ _DEEP_WORDS = [
     # third-person "بيخوفك" in the comment's own example never
     # matched; both prefixes are in the list now.)
     "خوفك", "بتخوفك", "بيخوفك",
+    # v1.18: time-travel questions ("لو رجع بيك الزمن كنت هتغير
+    # ايه؟") are regret-adjacent deep questions — the live v1.17
+    # Task B #8 reply just echoed the question back, because no
+    # deep word matched and the turn got no answer-first note at all.
+    "رجع بيك الزمن", "هتغير",
 ]
 
 
@@ -689,7 +694,11 @@ def looks_like_fear_question(text: str) -> bool:
 # looks_like_deep_question, like fear. The regret containment
 # (sincere fallback) applies ONLY here: a fear/happiness/dream
 # answer must not be replaced by a regret line.
-_REGRET_WORDS = ["ندمت", "ندمان", "ندمانه", "بتندم", "ندم", "الندم"]
+# v1.18: time travel ("لو رجع بيك الزمن كنت هتغير ايه؟") is
+# regret-adjacent — what he would change IS what he regrets — so
+# it joins the regret cluster (facet + containment + fallback).
+_REGRET_WORDS = ["ندمت", "ندمان", "ندمانه", "بتندم", "ندم", "الندم",
+                 "رجع بيك الزمن"]
 
 
 def looks_like_regret_question(text: str) -> bool:
