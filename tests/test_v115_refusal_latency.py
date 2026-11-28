@@ -136,7 +136,7 @@ def test_detector_canned_beats_marker_order():
 # --- (b) prompt edits ---------------------------------------------------------
 
 def test_prompt_version_is_7_1():
-    assert PROMPT_VERSION == "7.1"
+    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
 
 
 def test_roast_block_has_true_context_line():

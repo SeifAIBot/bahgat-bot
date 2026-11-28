@@ -53,8 +53,8 @@ CHAT_ID = -100222
 # --- prompt level -----------------------------------------------------------
 
 def test_prompt_version_is_7_0():
-    # v1.14: prompt 7.0 — the persona facts atomised out of SYSTEM_BASE.
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+    # v1.19: merged prompt D (ChatGPT deep/continuity + masculine-default + English ban; Claude mocking denial).
+    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
 
 
 # Row phrases for the expansion facts (brain/persona_facts.py) — the

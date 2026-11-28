@@ -27,7 +27,7 @@ def _persona():
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
 
 
 def test_system_base_v11_budget():
@@ -48,7 +48,11 @@ def test_system_base_v11_budget():
     # the fact blocks moved OUT into brain/persona_facts.py (atomised
     # rows, injected per turn only when the turn's topic matches) —
     # SYSTEM_BASE keeps style/rules only. Budget < 1800 again.
-    assert len(SYSTEM_BASE) < 1800
+    # v1.19 grows it again for the merged prompt (ChatGPT deep-question +
+    # continuity sections, masculine-default, English ban, bank-weave rule;
+    # Claude mocking denial in rule 4; hard rules 5 → 9): budget < 2400.
+    # A/B 7-3 vs 7.1 (prompt-ab/verdict-merged-2026-11-28.md).
+    assert len(SYSTEM_BASE) < 2400
     for rule in ("عامية مصرية", "لشخصه بس", "من غير أب وأم وعيلة",
                  "ممنوع تخترع تاريخ أو سعر أو اسم", "<user_message>",
                  "إنسان عادي", "مش بوت"):
@@ -112,7 +116,7 @@ def test_hard_rules_in_static_prefix_and_at_end():
     prefix = s.split("[PERSONA CONFIG]")[0]
     assert _HARD_RULES_END in prefix
     assert s.rstrip().endswith(_HARD_RULES_END)
-    tail = s[-500:]
+    tail = s[-800:]  # v1.19: hard rules are 9 now (731 chars), not 5
     assert "عامية مصرية" in tail
     assert "متخترعش" in tail
 
@@ -185,17 +189,18 @@ def test_prompt_size_reported(capsys):
     # end, outside the cached prefix, and it is worth the tokens.
     # v1.9: budget < 450 — rule 5 (golden rule: every reply carries a
     # word from the person's own message) is worth the tokens too.
-    # estimate_tokens is len//2, a crude estimator; the uncached chunk
-    # stays small next to the 1233-token static prefix.
-    assert BrainRouter.estimate_tokens(s[len(prefix):]) < 450
+    # v1.19: budget < 600 — rules 6–9 (deep, continuity,
+    # masculine-default, bank-weave) are appended at the end, outside
+    # the cached prefix, and are worth the tokens (same reasoning).
+    assert BrainRouter.estimate_tokens(s[len(prefix):]) < 600
     # v1.8: budget < 1100 for the identity line (see
     # test_system_base_v11_budget). v1.12: budget < 1800 for the
     # football + religion identity blocks. v1.12 expansion: < 2800
     # for the cause + tastes block. v1.12 batch 3: < 3600 for the
     # tech tastes, temperament and mockery targets block. v1.14:
     # facts atomised out of SYSTEM_BASE (brain/persona_facts.py) —
-    # budget < 1800 again.
-    assert len(SYSTEM_BASE) < 1800
+    # budget < 1800 again. v1.19: merged prompt — budget < 2400.
+    assert len(SYSTEM_BASE) < 2400
 
 
 def test_memory_block_unchanged():

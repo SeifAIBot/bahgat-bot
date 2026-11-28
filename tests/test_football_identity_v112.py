@@ -45,8 +45,8 @@ CHAT_ID = -100222
 
 # --- prompt level -----------------------------------------------------------
 
-def test_prompt_version_is_7_0():
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+def test_prompt_version_is_7_3():
+    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
 
 
 FOOTBALL_FACTS = (

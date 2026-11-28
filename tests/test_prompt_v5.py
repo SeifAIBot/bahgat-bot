@@ -4,7 +4,7 @@ from brain.prompt import (
 
 
 def test_prompt_version():
-    assert PROMPT_VERSION == "7.1"  # v1.14: facts atomised out of SYSTEM_BASE
+    assert PROMPT_VERSION == "7.3"  # v1.19: merged prompt D — A/B 7-3 vs 7.1
 
 
 def test_search_requires_citations():
@@ -16,7 +16,7 @@ def test_search_requires_citations():
 
 def test_hard_rules_restated_at_end():
     s = build_system_prompt(member={"first_name": "سيف", "username": "x"}, mood=80)
-    tail = s[-500:]
+    tail = s[-800:]  # v1.19: hard rules are 9 now (731 chars), not 5
     assert "عامية مصرية" in tail
     assert "متخترعش" in tail
 
