@@ -43,11 +43,46 @@ def _conn():
     return c
 
 
+def _migrate_messages_table(c) -> None:
+    """v1.x -> v2.2: the old messages table (user_id/role/created_at) shares
+    the bahgat.db filename on the persistent volume, so CREATE TABLE IF NOT
+    EXISTS silently keeps it — and every add_message then dies with
+    "no column named author", silencing the bot entirely (live 2026-11-28:
+    app Running, zero replies, not even to an @mention). Migrate it with
+    SQLite's documented rename pattern, preserving rows (role -> author,
+    created_at -> ts). Idempotent: a new-schema table is left alone."""
+    cols = {r[1] for r in c.execute("PRAGMA table_info(messages)")}
+    if not cols:
+        return  # no table yet — the schema script below creates it
+    if "author" in cols and "ts" in cols:
+        return  # already the new shape
+    if "role" not in cols or "created_at" not in cols:
+        # Unknown shape — drop it rather than crash every message.
+        c.execute("DROP TABLE messages")
+        return
+    c.execute("""
+        CREATE TABLE messages_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            author TEXT NOT NULL,
+            text TEXT NOT NULL,
+            ts REAL NOT NULL
+        )""")
+    c.execute("""
+        INSERT INTO messages_new (id, chat_id, author, text, ts)
+        SELECT id, chat_id, COALESCE(role, 'user'), text,
+               COALESCE(created_at, 0)
+        FROM messages""")
+    c.execute("DROP TABLE messages")
+    c.execute("ALTER TABLE messages_new RENAME TO messages")
+
+
 def init_db(db_path=None) -> None:
     path = Path(db_path) if db_path else _db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(path, timeout=10)
     try:
+        _migrate_messages_table(c)
         c.executescript(_SCHEMA)
         c.commit()
     finally:

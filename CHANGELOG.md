@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.2.1 — 2026-11-28 — Hotfix: v2.2 went totally silent live
+
+**Root cause (reproduced locally; full diagnosis in
+`docs/v22-silence-diagnosis-2026-11-28.md`):** the Cloady volume still held
+the v1.x `bahgat.db`, whose `messages` table has columns
+(id, chat_id, user_id, role, text, created_at). v2.2 changed the columns to
+(id, chat_id, author, text, ts) but `init_db` only ran
+`CREATE TABLE IF NOT EXISTS` — a silent no-op against the old table. Every
+`handle_message` calls `db.add_message` before any branch (even the
+identity denial), so every message died with
+`sqlite3.OperationalError: table messages has no column named author` —
+0/12 live replies, no reply even to a direct @mention, while the app stayed
+Running on Cloady with no visible error (free tier has no log access). The
+comma theory is wrong: the trigger is a substring match on "بهجت".
+
+**Fix:** `bahgat/db.py::init_db` now migrates the old table with SQLite's
+documented rename pattern (new table → INSERT SELECT mapping role→author,
+created_at→ts → DROP old → RENAME), preserving recent history. Idempotent;
+a new-schema table is left alone; an unknown shape is dropped rather than
+crashing every message.
+
+**Tests:** new regression test `test_migrates_v1_messages_table` (builds a
+v1.x-schema DB, runs init_db, add_message + recent_messages +
+recent_bot_replies all work, old rows preserved). Suite: 215 passed + 1
+known environmental failure (`test_unresolvable_host` — the VM egress
+proxy resolves the fake host, same as the v2.2 baseline), ruff clean.
+
 ## v2.2 — 2026-11-28 — Instinct base aligned to owner vision
 
 This is Instinct's v2.1 rewrite adopted as the new base and aligned to the
