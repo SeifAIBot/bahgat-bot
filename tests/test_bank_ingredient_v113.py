@@ -384,7 +384,17 @@ def test_length_truncation_retries_with_doubled_cap(tmp_path):
     assert calls[1]["max_completion_tokens"] > calls[0]["max_completion_tokens"]
 
 
-def test_length_truncation_twice_returns_longest_draft(tmp_path):
+def test_length_truncation_twice_fails_over_to_next_entry(tmp_path):
+    # v1.17 (live v1.16 probe #22, conversation #1/#6): the old code
+    # returned the longest truncated draft as-is when the doubled-cap
+    # retry also truncated — a mid-word fragment went out as the reply.
+    # Now the entry is treated as failed and the router fails over to
+    # the next entry; when every entry truncates, the short honest
+    # FAIL_MSG goes out instead. The truncated draft is never sent.
+    # (The fake client is rebuilt per entry, so every entry replays
+    # the same two truncations — this is the all-entries-truncate case.)
+    from brain.router import FAIL_MSG
+
     router = _router(tmp_path)
     calls = []
     router._client = lambda name: _ScriptedClient(calls, [
@@ -393,5 +403,8 @@ def test_length_truncation_twice_returns_longest_draft(tmp_path):
     ])
     text, provider, _ = asyncio.run(
         router.chat([{"role": "user", "content": "عامل ايه"}], hard=False))
-    assert text == "يا حمار يا سيف، انت"
-    assert len(calls) == 2
+    assert text == FAIL_MSG
+    assert provider == "none"
+    assert len(calls) == 16  # 8 entries x 2 attempts each
+    assert calls[1]["max_completion_tokens"] > calls[0]["max_completion_tokens"]
+    assert "يا حمار يا سيف، انت" not in text

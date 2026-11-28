@@ -604,14 +604,17 @@ async def test_canned_deflection_on_chat_regenerates_once(
     assert "محشي" in final
 
 
-async def test_canned_deflection_twice_sends_dismiss_line(
+async def test_canned_deflection_thrice_sends_dismiss_line(
         memory_fakes, settings, tmp_db, monkeypatch):
-    # The regen deflects again — a dismiss bank line goes out, never
-    # the canned line, never the technical-error line.
-    router = ScriptedRouter([CANNED, CANNED])
+    # v1.17 (live v1.16 conversation #4): the canned regen now has a
+    # second chance (canned_regen2) — the dismiss line goes out only
+    # when THAT also deflects. Three deflections in a row, never the
+    # canned line, never the technical-error line.
+    router = ScriptedRouter([CANNED, CANNED, CANNED])
     ctx, bot, msg, user = await _turn(
         monkeypatch, settings, "يا بهجت أنا جعان، أكل إيه؟",
         router, update_id=3006)
+    assert len(router.calls) == 3  # main + canned regen + canned regen2
     final = _final(msg)
     assert final != CANNED
     assert CANNED not in final

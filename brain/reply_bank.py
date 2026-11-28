@@ -343,6 +343,7 @@ def _pick(
     user_id: int | None = None,
     target_gender: str | None = None,
     target_number: str | None = None,
+    target_only: bool = False,
 ) -> str | None:
     """Random line from a category, preferring lines tagged with
     `situation` (v1.6 phase 2) and excluding the no-repeat window
@@ -355,6 +356,10 @@ def _pick(
     line fits, the pool is the generic lines only — and if there are
     no generic lines either, None (never a mismatched line). When
     target is None (every other category) there is no filtering.
+    target_only (v1.17): with target, generic lines are NOT eligible
+    at all — only tagged lines serve, and pool exhaustion returns
+    None instead of falling back to generic. Used by the Sisi
+    opinion question, where a generic opinion line is the dodge.
     situation: when given and not "general", lines whose `situations:`
     list contains it are preferred. When the situation has NO tagged
     line in the eligible pool (e.g. cowardly — no roast line carries
@@ -391,6 +396,15 @@ def _pick(
         entries = [e for e in entries if not e.get("dare")]
     if target is not None:
         entries = [e for e in entries if _target_matches(e.get("target"), target)]
+    if target_only:
+        # v1.17: subject-only pick — only lines TAGGED with the
+        # target are eligible; generic (untagged) lines are NOT a
+        # fallback. The roast's specific-then-generic tiering would
+        # serve a generic line here, which for the Sisi opinion
+        # question is exactly the dodge (op-10's governance line).
+        # When the tagged pool is exhausted, None — the caller falls
+        # through to the LLM turn (whose Sisi rule insults him).
+        entries = [e for e in entries if e.get("target")]
     # v1.13: NO perv gate. An earlier draft gated perv-only lines
     # behind a perv-marked request; it was removed before shipping —
     # the gender/number gates fix the observed v1.11 defects, and the
@@ -602,6 +616,37 @@ def is_canned_deflection(reply: str) -> bool:
     return False
 
 
+# v1.17 — regret-question evasion (live v1.16 probe #14: "ندمت على
+# حاجة؟" got the dismiss bank line "بس يا أستاذة!" and no answer).
+# A regret answer must be a sincere, specific regret — a dismiss
+# bank line, a canned deflection, or a 1-4 word reply with no regret
+# content at all is an evasion, and the handler replaces it with the
+# sincere REGRET_FALLBACK_LINE. The word-count arm needs the
+# regret-word guard: a short sincere answer ("ندمت على كتير") names
+# the regret and is NOT an evasion.
+_REGRET_REPLY_WORDS = ("ندم", "ندمت", "ندمان", "ضيعت", "سنين")
+
+
+def is_regret_evasion(reply: str) -> bool:
+    """True when a reply to a regret question dodges it instead of
+    answering sincerely."""
+    if not reply or not reply.strip():
+        return True
+    if is_canned_deflection(reply):
+        return True
+    norm = normalize_arabic(reply).strip(" .!؟،,;:\n\t")
+    dismiss_lines = {
+        normalize_arabic(e["line"]).strip(" .!؟،,;:\n\t")
+        for e in load_bank().get("dismiss", [])
+    }
+    if norm in dismiss_lines:
+        return True
+    words = norm.split()
+    if len(words) <= 4 and not any(w in norm for w in _REGRET_REPLY_WORDS):
+        return True
+    return False
+
+
 # --- roast refusal detection (v1.15, research report §1.2 Rank 1) --------
 # The v1.13 live retest showed the model refusing roasts 3/10 times
 # with the identical canned deflection — and the refusal then reached
@@ -798,8 +843,18 @@ def match_reply_bank_categorized(
     # Opinion: only Bahgat's own Sisi/takfir stance, only on that topic.
     # The lines are ABOUT a non-member subject, never about a group
     # member, so the pool is not member-restricted.
+    # v1.17 (live v1.16 probe #18): "ايه رأيك في السيسي؟" got the
+    # governance dodge (op-10) — the pick drew from all 49 opinion
+    # lines, and only 12 name السيسي. A Sisi opinion question now
+    # picks ONLY Sisi-tagged lines (target_only, no generic
+    # fallback); pool exhaustion falls through to the LLM turn,
+    # whose Sisi rule insults him. "بلحه" is his nickname.
     if looks_like_opinion_ask(text) and _has(t, _OPINION_TOPICS):
-        line = _pick("opinion_asked", chat_id, member_safe_only=False)
+        if "سيسي" in t or "بلحه" in t:
+            line = _pick("opinion_asked", chat_id, member_safe_only=False,
+                         target="السيسي", target_only=True)
+        else:
+            line = _pick("opinion_asked", chat_id, member_safe_only=False)
         if line is not None:
             return ("opinion_asked", line)
 

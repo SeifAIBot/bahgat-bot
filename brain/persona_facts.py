@@ -33,6 +33,7 @@ Deviations from report §5 (documented, see CHANGELOG v1.14):
 """
 import logging
 import re
+import zlib
 
 from brain.intent import _has, normalize_arabic
 
@@ -256,7 +257,14 @@ _TOPIC_KEYWORDS = {
                  "مسجد", "حلال", "حرام", "فتوي"],
     "politics": ["سياسه", "فلسطين", "اسرائيل", "قدس", "صهيون",
                  "سعوديه", "مغرب", "ظلم", "حريه", "تعبير", "ثوره",
-                 "حكومه"],
+                 "حكومه",
+                 # v1.17: the presidency (live v1.16 probe #19 — "عايز
+                 # تبقى رئيس؟" never matched a topic, so f52 never
+                 # surfaced). "رييس" is the hamza-less Egyptian
+                 # spelling, "ريس" the colloquial "الريس". Football
+                 # precedes politics in TOPICS, so "رئيس الأهلي"
+                 # still lands on football, not here.
+                 "رئيس", "رييس", "رئاسه", "ريس"],
     "youtubers": ["يوتيوب", "يوتيوبر", "يوتيوبرز", "عزام", "مهدي",
                   "فوزي", "يحيي"],
     "tech": ["اندرويد", "ايفون", "ماك", "تكنولوجيا", "موبايل",
@@ -561,10 +569,49 @@ def reply_names_fear(reply):
     return False
 
 
-def deep_fallback_line(seed=""):
+def deep_fallback_line(seed="", exclude=""):
     """Pick one deep fallback line deterministically by seed (so the
-    two lines rotate across turns instead of always the first)."""
-    import zlib
+    two lines rotate across turns instead of always the first).
+    v1.17: `exclude` is the fallback sent last in this chat — the
+    pick never repeats it twice in a row (live v1.16 probe #12 was
+    a byte-identical repeat; the two-line pool rotates 50/50 by
+    seed alone)."""
+    lines = [fb for fb in DEEP_FALLBACK_LINES if fb != exclude]
+    if not lines:
+        lines = list(DEEP_FALLBACK_LINES)
+    idx = zlib.crc32(str(seed).encode("utf-8")) % len(lines)
+    return lines[idx]
 
-    idx = zlib.crc32(str(seed).encode("utf-8")) % len(DEEP_FALLBACK_LINES)
-    return DEEP_FALLBACK_LINES[idx]
+
+def next_lead_fear(last_id=None):
+    """v1.17 — the next fear row in rotation (f57 → f58 → f59 →
+    f57...), never the one used last in this chat. The deep variant
+    lists all three fears; the lead fear is the one the reply must
+    name FIRST, so a re-asked fear question varies its telling
+    instead of repeating the same answer (research report §2.5 P1:
+    rotate which fact leads; temperature alone barely varies a
+    dominant sincere answer). Returns a fear row dict."""
+    fears = fear_facts()
+    if not fears:
+        return None
+    if last_id is None:
+        return fears[0]
+    ids = [f["id"] for f in fears]
+    try:
+        idx = ids.index(last_id)
+    except ValueError:
+        return fears[0]
+    return fears[(idx + 1) % len(fears)]
+
+
+# v1.17 — the sincere regret fallback (live v1.16 probe #14:
+# "ندمت على حاجة؟" got the evasive "بس يا أستاذة!"). Grounded in
+# the bot's own live sincere answer (v1.16 conversation #6: "بحس
+# إني ضيعت سنين في حاجات ما كانتش تستاهل") — a general life
+# regret, not an invented biography, and NOT a Bahgat quote. It is
+# a deep-turn fallback only, like DEEP_FALLBACK_LINES, never a
+# roast/insult line.
+REGRET_FALLBACK_LINE = (
+    "أكتر حاجة ندمت عليها إني ضيعت سنين في حاجات ما كانتش "
+    "تستاهل — دي الحاجة اللي بفكر فيها لما بسأل نفسي."
+)

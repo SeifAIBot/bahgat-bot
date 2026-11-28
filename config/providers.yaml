@@ -141,7 +141,7 @@ providers:
     role: emergency spare only — 50 RPD unfunded, cap is account-wide across all OpenRouter entries
 
 # Output-token defaults per provider family, used when the caller does
-# not pass max_tokens (handlers pass 600, which overrides per call).
+# not pass max_tokens (handlers pass 3000, which overrides per call).
 caps:
   output_tokens:
     groq: 3000

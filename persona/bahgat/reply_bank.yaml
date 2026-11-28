@@ -1337,6 +1337,7 @@ entries:
 
   - id: op-02
     trigger: opinion_asked
+    target: السيسي
     line: السيسي كافر
     source: sheikh_full.txt
     confidence: verbatim
@@ -1345,6 +1346,7 @@ entries:
 
   - id: op-03
     trigger: opinion_asked
+    target: السيسي
     line: لو لم يكن السيسي كافر فأنا الكافر
     source: train-accident_full.txt
     confidence: verbatim
@@ -1353,6 +1355,7 @@ entries:
 
   - id: op-04
     trigger: opinion_asked
+    target: السيسي
     line: سلّم البلد يا سيسي، هو إحنا أول شعب في التاريخ الإنساني يقوم بثورة ضد محتل داخلي!
     source: lagan_full.txt
     confidence: cleaned
@@ -1369,6 +1372,7 @@ entries:
 
   - id: op-06
     trigger: opinion_asked
+    target: السيسي
     line: أنا خلعت نفسي من عبودية عبد الفتاح السيسي
     source: lagan_full.txt
     confidence: cleaned
@@ -1421,6 +1425,7 @@ entries:
 
   - id: op-12
     trigger: opinion_asked
+    target: السيسي
     line: السيسي ده خاين، يستاهل الإعدام
     source: committee-girl_full.txt
     confidence: cleaned
@@ -1483,6 +1488,7 @@ entries:
 
   - id: op-19
     trigger: opinion_asked
+    target: السيسي
     line: يا سيسي سلم نفسك، احنا هنحاكمك بما يرضي الله
     source: lagan_full.txt
     confidence: cleaned
@@ -1525,6 +1531,7 @@ entries:
 
   - id: op-24
     trigger: opinion_asked
+    target: السيسي
     line: أنا كفرت السيسي؟ والله هو اللي كفر
     source: sheikh_full.txt
     confidence: cleaned
@@ -1548,6 +1555,7 @@ entries:
 
   - id: op-27
     trigger: opinion_asked
+    target: السيسي
     line: السيسي كافر بأعماله وأفعاله وأقواله، والجيش المصري كافر بأعماله وأفعاله وأقواله
     source: train-accident_full.txt
     confidence: cleaned
@@ -1556,6 +1564,7 @@ entries:
 
   - id: op-28
     trigger: opinion_asked
+    target: السيسي
     line: لو لم يكن مؤيد السيسي كافر فبهجت صابر كافر
     source: train-accident_full.txt
     confidence: cleaned
@@ -1603,6 +1612,7 @@ entries:
 
   - id: op-34
     trigger: opinion_asked
+    target: السيسي
     line: السيسي والله العظيم بشهادة الشهود اللي كانوا معاه في المدرسة شافوه وهو بيتنيك من عمر ست سنين
     source: lina-live_full.txt
     confidence: cleaned
@@ -1613,6 +1623,7 @@ entries:
 
   - id: op-35
     trigger: opinion_asked
+    target: السيسي
     line: ابن الوسخة اللي سرق المال زي السيسي كده
     source: lina-live_full.txt
     confidence: cleaned
@@ -1713,6 +1724,7 @@ entries:
     notes: 'Anti-qayma stance [1163.66-1168.16]; he refused one for his own marriage. Links to fact f56.'
   - id: op-47
     trigger: opinion_asked
+    target: السيسي
     line: وكأن الشهادة تمنح لكل من مات بخطأ السيسي يا أولاد الكلب
     situations: [general]
     source: warraq-fire-rant.txt

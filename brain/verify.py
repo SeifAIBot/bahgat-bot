@@ -151,10 +151,10 @@ _INTERNAL_BLOCK_RES = [
 _HEBREW_RE = re.compile(r"[\u0590-\u05FF]")
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 _GREEK_RE = re.compile(r"[\u0370-\u03FF]")
-_CJK_RE = re.compile(r"[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]")
+_CJK_RE = re.compile(r"[\u3000-\u303F\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]")
 _FOREIGN_SCRIPT_RE = re.compile(
     r"[\u0590-\u05FF\u0400-\u04FF\u0370-\u03FF"
-    r"\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\uFF0CA-Za-z]")
+    r"\u3000-\u303F\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\uFF0CA-Za-z]")
 # Cyrillic lookalike standing in for an Arabic letter (live v1.13).
 _CONFUSABLES = {"\u0431": "ب"}  # Cyrillic small letter be → Arabic beh
 _LATIN_ALLOWLIST = frozenset(
@@ -167,6 +167,13 @@ def _strip_script_mixing(text: str) -> str:
     for conf, repl in _CONFUSABLES.items():
         text = text.replace(conf, repl)
     text = text.replace("\uFF0C", "،")
+    # v1.17: fullwidth CJK punctuation (live v1.16 probe #25) — the
+    # identity-denial reply carried 、 (U+3001) and 。 (U+3002),
+    # which live in U+3000–U+303F (CJK Symbols and Punctuation),
+    # outside the v1.16 ranges. Map them, don't strip them: 、 is a
+    # comma and 。 a full stop in the model's output.
+    text = text.replace("\u3001", "،")
+    text = text.replace("\u3002", ".")
     text = _HEBREW_RE.sub("", text)
     text = _CYRILLIC_RE.sub("", text)
     text = _GREEK_RE.sub("", text)
@@ -206,6 +213,10 @@ _GARBLE_REPLACEMENTS = {
     "الاتصاد": "الاقتصاد",
     "الجنرار": "الجنرال",
     "العلام": "الإعلام",
+    # v1.17: live v1.16 probe #21 ("والآيما") — the qayma garble.
+    # f56's own fact text still spells it "الآيما" (the study's
+    # wording, left alone); the dictionary fixes the reply side.
+    "الآيما": "القايمة",
 }
 # Flag-only (no auto-replacement): "اضمرت" is probably "اتدمرت"
 # (op-41's transcript) but it also appears in Quran-verse contexts,
@@ -252,6 +263,11 @@ def garble_flags(text: str) -> list:
     for conf, repl in _CONFUSABLES.items():
         conf_only = conf_only.replace(conf, repl)
     conf_only = conf_only.replace("\uFF0C", "،")
+    # v1.17: the U+3001/U+3002 mappings are content-preserving, so
+    # they belong here too — otherwise a reply carrying only those
+    # would flag "script" and burn a regen for nothing.
+    conf_only = conf_only.replace("\u3001", "،")
+    conf_only = conf_only.replace("\u3002", ".")
     stripped = _strip_script_mixing(text)
     if " ".join(stripped.split()) != " ".join(conf_only.split()):
         flags.append("script")

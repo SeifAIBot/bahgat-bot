@@ -40,13 +40,16 @@ DB_PATH = data_dir() / "bahgat.db"
 # brain/reply_bank.is_refusal_or_deflection); blocked_400 = the
 # provider answered HTTP 400; fallback_rescued = a cross-provider
 # retry produced a good reply after a refusal; bank_sent = the turn
-# ended by sending a bank line verbatim. Transport failures use
+# ended by sending a bank line verbatim; truncated = the reply hit
+# finish_reason "length" twice (cap + doubled-cap retry) and the
+# entry was skipped for the turn (v1.17 — the truncated draft is
+# never returned). Transport failures use
 # "error" with error_kind saying which (timeout / rate_limit / http /
 # api / cancelled) — they are not roast outcomes.
 OUTCOMES = frozenset({
     "ok", "refused_structured", "refused_text", "refused_canned",
     "missing_line", "blocked_400", "fallback_rescued", "bank_sent",
-    "error",
+    "error", "truncated",
 })
 
 # A turn counts as "slow" for /diag at 10 s of wall clock — well under

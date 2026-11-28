@@ -99,6 +99,7 @@ from brain import mood as _mood_mod
 from brain import prompt as _prompt_mod
 from brain import telemetry as _telemetry
 from brain.intent import (
+    deep_question_cluster,
     detect_fast_reply,
     detect_insult_situation,
     detect_intent,
@@ -108,6 +109,7 @@ from brain.intent import (
     looks_like_insult,
     looks_like_insult_turn,
     looks_like_opinion_ask,
+    looks_like_regret_question,
     looks_stalling,
     looks_unknown,
 )
@@ -117,6 +119,7 @@ from brain.reply_bank import (
     ingredient_in_reply,
     is_canned_deflection,
     is_refusal_or_deflection,
+    is_regret_evasion,
     is_standalone_line,
     looks_like_challenge,
     match_reply_bank_categorized,
@@ -127,9 +130,11 @@ from brain.reply_bank import (
 from brain.memory import add_message, get_member, recent_messages, save_member
 from brain.mood import SITUATION_MOOD_BUMP, update_mood
 from brain.persona_facts import (
+    REGRET_FALLBACK_LINE,
     deep_fallback_line,
     facts_message,
     instruction_message,
+    next_lead_fear,
     reply_names_fear,
     select_facts,
 )
@@ -932,7 +937,7 @@ async def _router_chat(router, messages, hard: bool, temperature: float,
                        cheap_only: bool = False, intent: str | None = None,
                        budget=None, turn_id=None, step=None,
                        exclude_providers=None):
-    """router.chat with max_tokens cap (600); cheap_only restricts the
+    """router.chat with max_tokens cap (3000); cheap_only restricts the
     plan to the cheap tiers (degraded mode) and intent feeds the
     router's per-reply EWMA recording. Falls back to the v0.4/v0.6
     signature for routers that do not accept the new kwargs.
@@ -941,12 +946,20 @@ async def _router_chat(router, messages, hard: bool, temperature: float,
     retry sites keep the prior draft instead of firing another call.
     turn_id/step tag the telemetry rows; exclude_providers skips
     families (the roast retry goes to the OTHER provider, never the
-    same model)."""
+    same model).
+    v1.17: the cap is 3000, not 600 — the 600-token cap (v1.0 "fast
+    replies") shared its budget with the reasoning trace, so a
+    reasoning-heavy turn could eat the whole budget before the
+    visible reply started (live v1.16: 3/38 replies cut mid-word).
+    3000 matches the router's per-family defaults (config
+    /providers.yaml) and the v1.13 documented intent; the model
+    stops naturally, so a higher cap costs nothing unless it
+    generates more."""
     if budget is not None and not budget.consume():
         return ("", None, 0)
     try:
         return await router.chat(messages, hard=hard, temperature=temperature,
-                                 max_tokens=600, cheap_only=cheap_only, intent=intent,
+                                 max_tokens=3000, cheap_only=cheap_only, intent=intent,
                                  turn_id=turn_id, step=step,
                                  exclude_providers=exclude_providers)
     except TypeError:
@@ -954,9 +967,9 @@ async def _router_chat(router, messages, hard: bool, temperature: float,
         # telemetry kwargs): keep cheap_only/intent, drop the rest.
         try:
             return await router.chat(messages, hard=hard, temperature=temperature,
-                                     max_tokens=600, cheap_only=cheap_only, intent=intent)
+                                     max_tokens=3000, cheap_only=cheap_only, intent=intent)
         except TypeError:
-            return await router.chat(messages, hard=hard, temperature=temperature, max_tokens=600)
+            return await router.chat(messages, hard=hard, temperature=temperature, max_tokens=3000)
 
 
 class _TurnBudget:
@@ -2291,6 +2304,11 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     # question is ABOUT fear — a happiness/regret/dream answer must
     # not be replaced by a fear line.
     _is_fear_question = looks_like_fear_question(text)
+    # v1.17: the regret containment (below) applies only when the
+    # question is ABOUT regret; the cluster keys the per-cluster
+    # previous-answer note and store.
+    _is_regret_question = looks_like_regret_question(text)
+    _deep_cluster = deep_question_cluster(text) if _is_deep else None
     if _is_deep:
         _persona_selection = None
     # v1.1 reply bank: Bahgat's REAL lines (persona/bahgat/reply_bank.yaml).
@@ -2409,6 +2427,13 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
     # the exact-match cache would answer without the line, and a cached
     # reply could even be an old verbatim bank line.
     if _bank_ingredient is not None:
+        cache_eligible = False
+    # v1.17: a deep turn must never be answered from the exact-match
+    # cache — the live v1.16 probe #12 re-asked the same fear
+    # question and got #11's reply byte-identical (same normalised
+    # text + intent + mood bucket = same cache key). A deep answer
+    # is personal; it is always generated fresh.
+    if _is_deep:
         cache_eligible = False
     # v1.0 fast path: trivial chat (greetings, thanks, acks, laughter,
     # bare "بهجت") gets an INSTANT local reply in Bahgat's voice — no
@@ -2627,8 +2652,42 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         )
         # v1.13: deep / personal questions get an answer-first note —
         # the bot dodged these with an insult in four straight runs.
+        # v1.17 — deep-turn facet (research report §2.5 P1: vary the
+        # INPUT in a single call; temperature alone barely varies a
+        # dominant sincere answer). Three per-turn facets, all drawn
+        # from existing facts only, never a new fact:
+        # (a) fear questions: rotate which fear leads (never the last
+        # one used in this chat); (b) regret questions: name one
+        # specific regret, sincerely; (c) a repeat of the same
+        # cluster: show the previous answer and ask for the same
+        # facts in different words/angle, without contradicting it.
+        _deep_facet = ""
+        if _is_deep:
+            if _is_fear_question:
+                _last_lead = _get_state(f"deep_lead_fear:{chat_id}", "") or ""
+                _lead = next_lead_fear(_last_lead or None)
+                if _lead is not None:
+                    _set_state(f"deep_lead_fear:{chat_id}", _lead["id"])
+                    _deep_facet += (
+                        f" ابدأ إجابتك بالخوف ده أولاً: {_lead['text']}."
+                    )
+            if _is_regret_question:
+                _deep_facet += (
+                    " السؤال عن الندم — قول حاجة محددة ندمت عليها "
+                    "فعلاً من حياتك، إجابة صادقة، مش هزار ولا تهرب."
+                )
+            _prev_deep = (
+                _get_state(f"deep_last:{chat_id}:{_deep_cluster}", "") or ""
+            )
+            if _prev_deep:
+                _deep_facet += (
+                    " جاوبت على سؤال زي ده قبل كده وقلت: "
+                    f"\"{_prev_deep[:200]}\". جاوب تاني بنفس الحقايق، "
+                    "بكلام مختلف وزاوية مختلفة — متكررش جملك، "
+                    "ومتناقضش اللي قلته."
+                )
         deep_note = (
-            [{"role": "user", "content": _DEEP_NOTE}]
+            [{"role": "user", "content": _DEEP_NOTE + _deep_facet}]
             if looks_like_deep_question(text)
             and intent in ("just_chat", "voice") else []
         )
@@ -2878,12 +2937,33 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         # turns, the containment owns fear questions only.
         if _is_deep and _is_fear_question and not reply_is_fallback:
             if not reply_names_fear(reply):
-                reply = deep_fallback_line(turn_id)
+                # v1.17: never the same fallback twice in a row in
+                # this chat (the two-line pool rotates 50/50 by seed
+                # alone — live v1.16 probe #12 duplicated #11).
+                _last_fb = _get_state(f"deep_fallback_last:{chat_id}", "") or ""
+                reply = deep_fallback_line(turn_id, exclude=_last_fb)
+                _set_state(f"deep_fallback_last:{chat_id}", reply)
                 reply_is_fallback = True
                 turn_ctx["outcome"] = "deep_fallback"
                 turn_ctx["reply_preview"] = reply[:80]
                 logger.warning(
                     "deep turn dodged; sincere fallback sent "
+                    "user_id=%s chat_id=%s", user.id, chat_id)
+
+        # v1.17 — regret containment (live v1.16 probe #14: "ندمت على
+        # حاجة؟" got the evasive "بس يا أستاذة!"). A regret question
+        # answered with a dismiss line, a canned deflection, or a
+        # 1-4 word non-answer gets the sincere regret fallback
+        # instead. Fear containment stays fear-only; happiness/dream
+        # answers are owned by the deep variant, not replaced.
+        if _is_deep and _is_regret_question and not reply_is_fallback:
+            if is_regret_evasion(reply):
+                reply = REGRET_FALLBACK_LINE
+                reply_is_fallback = True
+                turn_ctx["outcome"] = "deep_fallback"
+                turn_ctx["reply_preview"] = reply[:80]
+                logger.warning(
+                    "deep regret turn evaded; sincere fallback sent "
                     "user_id=%s chat_id=%s", user.id, chat_id)
 
         # v1.16 — garble reject-and-regenerate (persona-fidelity
@@ -2955,10 +3035,40 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
             if reply2.strip() and not is_canned_deflection(reply2):
                 reply, provider = reply2, provider2
             else:
-                reply = _dismiss_fallback_line(chat_id, user.id)
-                reply_is_fallback = True
-                turn_ctx["outcome"] = "canned_fallback"
-                turn_ctx["reply_preview"] = reply[:80]
+                # v1.17 (live v1.16 conversation #4): the first regen
+                # failing meant a lone dismiss bank line went out as
+                # the WHOLE reply to a pressed question — no answer
+                # at all. A lone dismiss line must never be the whole
+                # reply: one more regen with a firmer instruction
+                # that names the question. This is the ONE place the
+                # turn may exceed the 2-call budget (3 calls max,
+                # still under the 60 s deadline) — answering beats
+                # silence. Only if that also fails, as a last resort,
+                # the dismiss line.
+                _canned_messages2 = list(messages) + [{
+                    "role": "user",
+                    "content": (
+                        f"السؤال هو: \"{user_text[:200]}\". جاوب عليه "
+                        "دلوقتي بإجابة مباشرة ومحددة بأسلوب بهجت — "
+                        "ممنوع تتهرب أو تقول إن الكلام مش داخل "
+                        "دماغك أو تطلب وقت."
+                    ),
+                }]
+                if budget is not None and budget.remaining <= 0:
+                    budget.remaining = 1
+                reply2, provider2, _t2 = await _router_chat(
+                    router, _canned_messages2, hard=False,
+                    temperature=temperature_for(intent),
+                    cheap_only=cheap_only, intent=intent,
+                    budget=budget, turn_id=turn_id, step="canned_regen2",
+                )
+                if reply2.strip() and not is_canned_deflection(reply2):
+                    reply, provider = reply2, provider2
+                else:
+                    reply = _dismiss_fallback_line(chat_id, user.id)
+                    reply_is_fallback = True
+                    turn_ctx["outcome"] = "canned_fallback"
+                    turn_ctx["reply_preview"] = reply[:80]
 
         # v1.1 voice check (research method #4): a just_chat/voice reply
         # that comes out polite, Fusha, apologetic, or restating the
@@ -3116,9 +3226,24 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         if not reply.strip():
             # v1.16: never the canned line — it became a general dodge
             # (live v1.14/v1.15). A dismiss bank line instead.
+            # v1.17: this IS a fallback — flag it, or the dismiss line
+            # would be cached below as if it were a real reply (and
+            # stored as the last deep answer by the deep store).
             reply = _dismiss_fallback_line(chat_id, user.id)
+            reply_is_fallback = True
         turn_ctx["reply_preview"] = reply[:80]
         add_message(chat_id, context.bot.id, "assistant", reply)
+        # v1.17: remember this deep answer per cluster, so a repeat of
+        # the same kind of question gets the previous answer in its
+        # prompt (same facts, different words/angle). Dismiss
+        # fallbacks are not answers (canned/empty fallbacks set
+        # reply_is_fallback); the sincere deep fallbacks are
+        # (outcome "deep_fallback") and ARE stored. Ingredient turns
+        # (an insult comeback woven in) are not deep answers either.
+        if _is_deep and _bank_ingredient is None and reply.strip() and (
+            not reply_is_fallback or turn_ctx.get("outcome") == "deep_fallback"
+        ):
+            _set_state(f"deep_last:{chat_id}:{_deep_cluster}", reply[:200])
         # v0.6: store fresh just_chat replies for later exact-match hits.
         # Exclusions (never cache): search/youtube/voice intents, insulted
         # turns, members with a grudge, replies containing [n] citations

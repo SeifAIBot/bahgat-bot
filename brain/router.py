@@ -40,8 +40,10 @@
   takes cheap_only + intent and records each successful reply's
   tokens once via memory.record_reply_tokens (EWMA input).
 - Output caps (default, when handlers don't pass max_tokens):
-  groq 1500, gemini 4000, cerebras/nvidia/openrouter 1500.
-  Handlers pass max_tokens=600, which overrides per call.
+  groq 3000, gemini 4000, cerebras/nvidia/openrouter 3000
+  (config/providers.yaml caps.output_tokens — the docstring said
+  groq 1500 before v1.17, which was stale).
+  Handlers pass max_tokens=3000 (v1.17), which overrides per call.
   Groq calls are additionally clamped so estimated prompt + max
   output stays under 7,500 (Groq 8,000 TPM window).
 - 401/403/404 (bad key / retired model / dead free tier) DISABLES
@@ -204,6 +206,42 @@ def _classify_429(exc_or_text, retry_after=None):
     if ra is not None:
         return ("unknown", min(ra, 3600))
     return ("unknown", 60)
+
+
+def _completion_kwargs(family, model, messages, temperature, mct, hard):
+    """Per-family Chat Completions kwargs for one attempt (v1.17:
+    extracted so the NVIDIA thinking switch is unit-testable).
+    - reasoning_effort="low" on EVERY call (Groq's default is
+      medium; reasoning shares the output budget with the visible
+      answer, so a medium trace can eat the cap before the reply
+      starts).
+    - include_reasoning=False only for Groq (unverified elsewhere).
+    - Chat turns only (not hard/search): repetition penalties, and
+      for NVIDIA, thinking OFF — Nemotron thinks by default and the
+      trace shares max_tokens with the visible answer (the Lightning
+      sibling returns reasoning-only content with default params,
+      see config/providers.yaml). Disabling thinking gives the whole
+      cap to the visible reply. Hard turns keep thinking: search
+      synthesis benefits from it. The wire field is
+      max_completion_tokens (there is no `output_tokens` on Chat
+      Completions — the v1.13 "output_tokens 3000" wording was a
+      misnomer for this field)."""
+    kwargs = {"model": model, "messages": messages, "temperature": temperature,
+              "max_completion_tokens": mct, "reasoning_effort": "low"}
+    if family == "groq":
+        kwargs["include_reasoning"] = False
+    if not hard:
+        # v1.13: repetition penalties for chat turns only. Search
+        # turns keep factual consistency (temperature 0.25, no
+        # penalties). Positive values penalise token reuse within one
+        # generation; cross-turn repetition is handled by the
+        # handler's opener check, not here.
+        kwargs["frequency_penalty"] = 0.5
+        kwargs["presence_penalty"] = 0.3
+        if family == "nvidia":
+            kwargs["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": False}}
+    return kwargs
 
 
 def _reasoning_tokens(usage) -> int:
@@ -899,21 +937,9 @@ class BrainRouter:
                 logger.exception("router client %s error", family)
                 last_err = e
                 continue
-            kwargs = {"model": model, "messages": messages, "temperature": temperature,
-                      "max_completion_tokens": mct, "reasoning_effort": "low"}
-            if family == "groq":
-                kwargs["include_reasoning"] = False
-            if not hard:
-                # v1.13: repetition penalties for chat turns only.
-                # Search turns keep factual consistency (temperature
-                # 0.25, no penalties). Positive values penalise token
-                # reuse within one generation; cross-turn repetition is
-                # handled by the handler's opener check, not here.
-                kwargs["frequency_penalty"] = 0.5
-                kwargs["presence_penalty"] = 0.3
+            kwargs = _completion_kwargs(
+                family, model, messages, temperature, mct, hard)
             self._last_call[name] = time.monotonic()
-            best_text = ""
-            best_tout = 0
             length_retried = False
             for attempt in range(attempts):
                 t0 = time.perf_counter()
@@ -954,11 +980,17 @@ class BrainRouter:
                         # max_completion_tokens, so a reasoning-heavy
                         # turn can eat the whole budget before the
                         # visible reply starts. Retry once with a
-                        # doubled cap; if that also truncates, return
-                        # the longest draft we have.
+                        # doubled cap.
+                        # v1.17: if the retry ALSO truncates, do NOT
+                        # return the truncated draft (the v1.13 code
+                        # did — "return the longest draft we have" —
+                        # which shipped 3/38 mid-word replies live in
+                        # v1.16). Treat this entry as failed for the
+                        # turn and try the NEXT entry in the plan; if
+                        # every entry truncates, chat() falls through
+                        # to the short honest FAIL_MSG below — never a
+                        # mid-word fragment.
                         logger.warning("reply truncated by length, provider=%s entry=%s", family, name)
-                        if len(text) > len(best_text):
-                            best_text, best_tout = text, tout
                         if family == "groq":
                             new_mct = min(mct * 2, max(mct, 7500 - est_in))
                         else:
@@ -977,6 +1009,7 @@ class BrainRouter:
                             "tokens_in": tin, "tokens_out": tout,
                             "reasoning_tokens": reasoning, "cached_tokens": cached,
                             "finish_reason": finish,
+                            "max_tokens": mct,
                             "retries": attempt, "status": "ok",
                             "truncated": True,
                         }, ensure_ascii=False))
@@ -989,9 +1022,11 @@ class BrainRouter:
                             turn_id, step, family, model,
                             (time.perf_counter() - t0) * 1000,
                             finish_reason=finish, tokens_in=tin,
-                            tokens_out=best_tout,
-                            temperature=temperature)
-                        return (best_text, family, best_tout)
+                            tokens_out=tout,
+                            temperature=temperature, outcome="truncated")
+                        last_err = RuntimeError(
+                            "reply truncated twice by length")
+                        break
                     if not text.strip():
                         raise RuntimeError("empty reply from model")
                     self._record_usage(name, tin, tout, model=model)
@@ -1004,6 +1039,7 @@ class BrainRouter:
                         "tokens_in": tin, "tokens_out": tout,
                         "reasoning_tokens": reasoning, "cached_tokens": cached,
                         "finish_reason": finish,
+                        "max_tokens": mct,
                         "retries": attempt, "status": "ok",
                     }, ensure_ascii=False))
                     self.last_call_meta = {

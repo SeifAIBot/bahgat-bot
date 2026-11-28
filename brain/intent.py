@@ -683,3 +683,27 @@ def looks_like_fear_question(text: str) -> bool:
     v1.11 deep test's "أنا مبسوط" answer is valid and names no
     fear)."""
     return _has(normalize_arabic(text or ""), _FEAR_WORDS)
+
+
+# v1.17: regret questions ("ندمت على حاجة؟") — a subset of
+# looks_like_deep_question, like fear. The regret containment
+# (sincere fallback) applies ONLY here: a fear/happiness/dream
+# answer must not be replaced by a regret line.
+_REGRET_WORDS = ["ندمت", "ندمان", "ندمانه", "بتندم", "ندم", "الندم"]
+
+
+def looks_like_regret_question(text: str) -> bool:
+    """True when the message asks about regret specifically."""
+    return _has(normalize_arabic(text or ""), _REGRET_WORDS)
+
+
+def deep_question_cluster(text: str) -> str:
+    """Which deep-question cluster a message belongs to — "fear",
+    "regret", or "deep" (any other personal question). Used for the
+    per-cluster previous-answer note and last-reply store (v1.17):
+    a repeat is only a repeat of the SAME kind of question."""
+    if looks_like_fear_question(text):
+        return "fear"
+    if looks_like_regret_question(text):
+        return "regret"
+    return "deep"
