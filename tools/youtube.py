@@ -68,10 +68,11 @@ _BOT_CHECK_MARKERS = (
 
 def _is_bot_check_error(detail: str) -> bool:
     """True when a yt-dlp error looks like YouTube refusing the request
-    from the server (bot-check). Same markers as tg.handlers'
-    _download_error_hint, so the owner hint stays accurate: a bot-check
-    failure is reported as 'يوتيوب رافض الطلب من السيرفر', anything
-    else gets its own (or no) hint — never a misleading one."""
+    from the server (bot-check). Single owner of the marker list:
+    tg.handlers' _download_error_hint calls this, so the owner hint
+    stays accurate: a bot-check failure is reported as 'يوتيوب رافض
+    الطلب من السيرفر', anything else gets its own (or no) hint —
+    never a misleading one."""
     s = (detail or "").lower()
     return any(m in s for m in _BOT_CHECK_MARKERS)
 
@@ -418,7 +419,7 @@ def _is_title_dupe(item: dict, kept: list[dict]) -> bool:
     return False
 
 
-def resolve_query(query: str, audio_only: bool = False) -> dict:
+def resolve_query(query: str) -> dict:
     """Resolve a YouTube URL or a plain-text search query to video metadata.
 
     Returns {"video_id", "url", "title", "duration", "approx_size"} where
@@ -534,7 +535,7 @@ def download(url_or_query: str, audio_only: bool, out_dir: str | None = None) ->
     elif "://" in s or s.lower().startswith("http"):
         raise ValueError("only YouTube URLs are allowed")
     else:
-        url = resolve_query(s, audio_only=audio_only)["url"]
+        url = resolve_query(s)["url"]
     req_dir = Path(out_dir) if out_dir else (ROOT / "data" / "downloads" / uuid.uuid4().hex)
     req_dir.mkdir(parents=True, exist_ok=True)
     # v1.1: the Android player client serves NO audio-only format —

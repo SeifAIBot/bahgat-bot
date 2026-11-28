@@ -128,3 +128,75 @@ def test_prune_processed_updates(tmp_db):
     remaining = c.execute("SELECT update_id FROM processed_updates").fetchall()
     c.close()
     assert remaining == [(2,)]
+
+
+# --- v1.15-simplified: reverse migration from the v2.2 messages shape ------
+# The live database was migrated to the v2.2 shape (author/ts) by the
+# v2.2.1 hotfix; v1.15 wants (user_id/role/created_at). init_db must
+# reverse-migrate BEFORE the CREATE TABLE IF NOT EXISTS schema script,
+# which silently keeps the wrong shape (SQLite checks only the name).
+
+def _build_v22_db(db_path):
+    """A bahgat.db whose messages table has the v2.2 shape, with history."""
+    c = sqlite3.connect(db_path)
+    c.execute("""CREATE TABLE messages (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   chat_id INTEGER, author TEXT, text TEXT, ts REAL)""")
+    c.execute("INSERT INTO messages(chat_id, author, text, ts) "
+              "VALUES(42, 'user', 'عامل ايه يا بهجت', 1795800000.0)")
+    c.execute("INSERT INTO messages(chat_id, author, text, ts) "
+              "VALUES(42, 'assistant', 'تمام يا عم', 1795800005.0)")
+    c.commit()
+    c.close()
+
+
+def test_migrates_v22_messages_table(tmp_path, monkeypatch):
+    db = tmp_path / "bahgat.db"
+    _build_v22_db(db)
+    monkeypatch.setattr(memory, "DB_PATH", db)
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+    memory.init_db()
+    # Shape is now v1.15, history preserved: author -> role,
+    # ts -> created_at, user_id = 0 (unknown member).
+    c = sqlite3.connect(db)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(messages)")]
+    assert cols == ["id", "chat_id", "user_id", "role", "text", "created_at"]
+    rows = c.execute("SELECT chat_id, user_id, role, text, created_at "
+                     "FROM messages ORDER BY id").fetchall()
+    c.close()
+    assert rows == [
+        (42, 0, "user", "عامل ايه يا بهجت", 1795800000.0),
+        (42, 0, "assistant", "تمام يا عم", 1795800005.0),
+    ]
+    # Writes + history reads work on the migrated table.
+    memory.add_message(42, 7, "user", "كمان رسالة")
+    rows = memory.recent_messages(42, limit=8)
+    assert [r["content"] for r in rows] == [
+        "عامل ايه يا بهجت", "تمام يا عم", "كمان رسالة"]
+    assert rows[0]["user_id"] == 0  # migrated row: no member match
+    # Idempotent: a second init is a no-op, rows survive.
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+    memory.init_db()
+    assert len(memory.recent_messages(42, limit=8)) == 3
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+
+
+def test_drops_unknown_messages_shape(tmp_path, monkeypatch):
+    db = tmp_path / "bahgat.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, weird TEXT)")
+    c.execute("INSERT INTO messages(id, weird) VALUES(1, 'x')")
+    c.commit()
+    c.close()
+    monkeypatch.setattr(memory, "DB_PATH", db)
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)
+    memory.init_db()
+    # Unknown shape is dropped and recreated empty — never crashes.
+    c = sqlite3.connect(db)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(messages)")]
+    assert cols == ["id", "chat_id", "user_id", "role", "text", "created_at"]
+    assert c.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+    c.close()
+    memory.add_message(1, 1, "user", "hi")
+    assert len(memory.recent_messages(1, limit=8)) == 1
+    monkeypatch.setattr(memory, "_SCHEMA_DONE", False)

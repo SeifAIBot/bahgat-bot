@@ -46,15 +46,12 @@ Telegram update
   caps; read once by the router at startup (changing it needs a restart).
 - `config/rules.yaml` — owner-only command list, parody bio text. The owner id
   lives ONLY in env (`OWNER_ID`); it was removed from this file.
-- `config/plugins.yaml` — exists but nothing reads it (see Plugins).
-
-## Plugins — aspirational, not real (known gap)
-- `plugins/` has a registry (`load_enabled()`) and three plugin files, but
-  nothing calls the registry and no plugin implements a shared interface.
+## Plugins — removed as dead code (v1.15-simplified)
+- The `plugins/` package and `config/plugins.yaml` were deleted: nothing
+  ever called the registry and no plugin implemented a shared interface.
   The pipeline calls `tools/*` directly from `tg/handlers.py`.
-- Do not add a fourth plugin expecting it to run. Either implement the
-  plugin system for real (one Protocol, dispatcher, one test per plugin) or
-  delete `plugins/` and `config/plugins.yaml`.
+- To add a plugin system for real, implement one Protocol, a dispatcher,
+  and one test per plugin — do not resurrect the deleted stub files.
 
 ## Known gaps (do not mistake for features)
 - No `services/` layer: `tg/handlers.py` still orchestrates the pipeline and

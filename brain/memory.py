@@ -103,6 +103,57 @@ def _strip_instruction_patterns(text: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _migrate_messages_table(c):
+    """Reverse-migrate a v2.2-shaped messages table to the v1.15 shape.
+
+    The live database was migrated to the v2.2 shape
+    messages(id, chat_id, author, text, ts) by the v2.2.1 hotfix; v1.15
+    wants messages(id, chat_id, user_id, role, text, created_at).
+    CREATE TABLE IF NOT EXISTS in the schema script silently keeps the
+    wrong shape (SQLite only checks the table NAME), so this runs
+    BEFORE the schema script, using SQLite's documented 12-step
+    rename pattern (create new -> copy -> drop old -> rename new).
+    Idempotent; unknown shapes are dropped rather than crashing every
+    message; a missing table is left for the schema script to create.
+    """
+    cols = [r[1] for r in c.execute("PRAGMA table_info(messages)")]
+    if not cols:
+        return  # no table: the schema script creates it
+    if "user_id" in cols and "role" in cols and "created_at" in cols:
+        return  # already the v1.15 shape
+    if "author" in cols and "ts" in cols:
+        # v2.2 shape -> v1.15 shape, preserving history: author
+        # ('user'/'assistant') maps straight to role, ts to
+        # created_at; user_id is unknown for these rows (0 = no member
+        # match, so recent_messages falls back to the "عضو" speaker tag).
+        fk = c.execute("PRAGMA foreign_keys").fetchone()[0]
+        try:
+            c.execute("PRAGMA foreign_keys=OFF")
+            with c:
+                c.execute("""CREATE TABLE messages_new (
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               chat_id INTEGER,
+                               user_id INTEGER,
+                               role TEXT,
+                               text TEXT,
+                               created_at REAL)""")
+                c.execute("""INSERT INTO messages_new
+                             (id, chat_id, user_id, role, text, created_at)
+                             SELECT id, chat_id, 0, author, text, ts
+                             FROM messages""")
+                c.execute("DROP TABLE messages")
+                c.execute("ALTER TABLE messages_new RENAME TO messages")
+        finally:
+            c.execute("PRAGMA foreign_keys=%d" % fk)
+        logger.info("messages migrated from v2.2 shape (author/ts) "
+                    "to v1.15 shape (user_id/role/created_at)")
+        return
+    # Unknown shape: drop it rather than crash every message; the
+    # schema script recreates an empty table.
+    logger.warning("messages table has unknown shape %r; dropping it", cols)
+    c.execute("DROP TABLE messages")
+
+
 def init_db():
     """Create the schema once. Idempotent; safe to call at startup."""
     global _SCHEMA_DONE
@@ -112,6 +163,7 @@ def init_db():
     c = sqlite3.connect(DB_PATH, timeout=10)
     try:
         c.execute("PRAGMA journal_mode=WAL")
+        _migrate_messages_table(c)
         schema = Path(__file__).resolve().parents[1] / "memory" / "schema.sql"
         c.executescript(schema.read_text(encoding="utf-8"))
         c.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id)")

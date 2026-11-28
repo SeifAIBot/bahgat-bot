@@ -360,10 +360,6 @@ class BrainRouter:
                 return p
         return None
 
-    def _model_for(self, name, key="model"):
-        cfg = self._provider_cfg(name)
-        return cfg.get(key) or cfg.get("model")
-
     def _caps(self):
         return self.cfg.get("caps", {}) or {}
 
@@ -422,10 +418,6 @@ class BrainRouter:
 
     # -- usage / quota (SQLite provider_usage, per entry+model) ------------
     @staticmethod
-    def _today_str():
-        return time.strftime("%Y-%m-%d", time.gmtime())
-
-    @staticmethod
     def _date_for(family, now=None):
         """Calendar date a family's daily quota resets on.
 
@@ -433,8 +425,7 @@ class BrainRouter:
         Gemini usage by the UTC date would over/under-count by up to 8h
         around the reset (see docs/research-quota-capacity.md §1/§3).
         Every other family resets at midnight UTC. `now` is a Unix
-        timestamp (default: time.time()); tests pass it explicitly.
-        _today_str() stays the plain UTC helper for other callers."""
+        timestamp (default: time.time()); tests pass it explicitly."""
         ts = time.time() if now is None else now
         if family == "gemini":
             ts -= 8 * 3600
@@ -519,40 +510,6 @@ class BrainRouter:
             return (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
         except Exception as e:
             logger.warning("provider_usage read failed for %s: %s", entry.get("name"), e)
-            return (0, 0, 0)
-
-    def _provider_usage_today(self, name, model=None):
-        """(requests, tokens_in, tokens_out) for today — today in the
-        family's own reset timezone (_date_for: Pacific for Gemini).
-
-        Back-compat wrapper: an entry name (or entry name + model)
-        returns that entry's per-model usage; a family name returns
-        the combined usage of the family (legacy rows + all its
-        entries' rows)."""
-        entry = self._entry(name)
-        if entry is not None:
-            return self._entry_usage(entry)
-        if model:
-            for e in self.entries:
-                if e.get("model") == model:
-                    return self._entry_usage(e)
-        try:
-            self.db.parent.mkdir(parents=True, exist_ok=True)
-            c = sqlite3.connect(self.db)
-            try:
-                self._ensure_usage_table(c)
-                names = [e["name"] for e in self.entries if e.get("family") == name]
-                placeholders = ",".join("?" for _ in names) if names else "''"
-                row = c.execute(
-                    f"SELECT COALESCE(SUM(requests),0), COALESCE(SUM(tokens_in),0), "
-                    f"COALESCE(SUM(tokens_out),0) FROM provider_usage WHERE date=? AND "
-                    f"(provider=? OR provider IN ({placeholders}))",
-                    (self._date_for(name), name, *names)).fetchone()
-            finally:
-                c.close()
-            return (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
-        except Exception as e:
-            logger.warning("provider_usage read failed for %s: %s", name, e)
             return (0, 0, 0)
 
     def _quota_exhausted(self, name, model=None):

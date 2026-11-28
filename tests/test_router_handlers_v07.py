@@ -108,9 +108,8 @@ def test_gemini_usage_written_and_read_under_pacific_date(tmp_path, monkeypatch)
     # Gemini row keyed by the Pacific date, Groq row by the UTC date.
     assert rows[("gemini-3.5-flash-lite", "2026-11-25")] == (1, 100, 50)
     assert rows[("groq-20b", "2026-11-26")] == (1, 7, 8)
-    # Reads see the same split: Gemini usage is the Pacific row only.
-    assert router._provider_usage_today("gemini-3.5-flash-lite") == (1, 100, 50)
-    assert router._provider_usage_today("groq-20b") == (1, 7, 8)
+    # The read path (_entry_usage, exercised by the routing tests)
+    # keys by the same split: Gemini usage is the Pacific row only.
 
 
 def test_gemini_ban_keyed_by_pacific_date(tmp_path, monkeypatch):

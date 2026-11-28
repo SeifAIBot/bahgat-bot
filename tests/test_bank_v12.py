@@ -273,13 +273,10 @@ class _FakeCtx:
 
 async def test_resolve_level_no_target_fails_safe():
     # v1.2: no resolvable target ("اشتمه" with no referent) is ambiguous
-    # -> person-only, whether or not the sender insulted the bot.
+    # -> person-only.
     ctx = _FakeCtx(_FakeBot(exc=RuntimeError("must not be called")))
     assert await h._resolve_insult_level(
-        ctx, -2001, "اشتمه", False, [], None, [], OWNER_ID) == (
-        "personal_only", None)
-    assert await h._resolve_insult_level(
-        ctx, -2002, "اشتمه", True, [], None, [], OWNER_ID) == (
+        ctx, -2001, "اشتمه", [], None, [], OWNER_ID) == (
         "personal_only", None)
 
 
@@ -288,7 +285,7 @@ async def test_resolve_level_named_non_member_stays_full():
     # non-member answer (e.g. "اشتم السيسي") — full range preserved.
     ctx = _FakeCtx(_FakeBot(exc=RuntimeError("user not found")))
     assert await h._resolve_insult_level(
-        ctx, -2003, "اشتم السيسي", False, [], None, [], OWNER_ID) == (
+        ctx, -2003, "اشتم السيسي", [], None, [], OWNER_ID) == (
         "full", "السيسي")
 
 
@@ -297,7 +294,7 @@ async def test_resolve_level_member_check_exception_fails_safe():
     ctx = _FakeCtx(_FakeBot(exc=RuntimeError("network down")))
     reply_to = {"user_id": 777, "first_name": "محمد"}
     assert await h._resolve_insult_level(
-        ctx, -2004, "اشتم محمد", False, [], reply_to, [], OWNER_ID) == (
+        ctx, -2004, "اشتم محمد", [], reply_to, [], OWNER_ID) == (
         "personal_only", "محمد")
 
 
@@ -305,12 +302,12 @@ async def test_resolve_level_member_vs_left():
     ctx = _FakeCtx(_FakeBot(member=_FakeMember("member")))
     reply_to = {"user_id": 778, "first_name": "محمد"}
     assert await h._resolve_insult_level(
-        ctx, -2005, "اشتم محمد", False, [], reply_to, [], OWNER_ID) == (
+        ctx, -2005, "اشتم محمد", [], reply_to, [], OWNER_ID) == (
         "personal_only", "محمد")
     ctx = _FakeCtx(_FakeBot(member=_FakeMember("left")))
     reply_to = {"user_id": 779, "first_name": "علي"}
     assert await h._resolve_insult_level(
-        ctx, -2006, "اشتم علي", False, [], reply_to, [], OWNER_ID) == (
+        ctx, -2006, "اشتم علي", [], reply_to, [], OWNER_ID) == (
         "full", "علي")
 
 
@@ -318,7 +315,7 @@ async def test_resolve_level_owner_target():
     ctx = _FakeCtx(_FakeBot(exc=RuntimeError("must not be called")))
     reply_to = {"user_id": OWNER_ID, "first_name": "سيف"}
     assert await h._resolve_insult_level(
-        ctx, -2007, "اشتم سيف", False, [], reply_to, [], OWNER_ID) == (
+        ctx, -2007, "اشتم سيف", [], reply_to, [], OWNER_ID) == (
         "owner", "سيف")
 
 

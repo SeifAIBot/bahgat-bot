@@ -277,13 +277,12 @@ def build_system_prompt(member=None, mood=30, search_text="", style_examples=Non
             f"[MEMBER] العضو: {member.get('first_name', '')}. "
             f"مزاجك معاه: {mood}/100. [/MEMBER]"
         )
-    calm = angry = furious = None
+    angry = furious = None
     if persona and isinstance(persona.get("mood"), dict):
-        calm = persona["mood"].get("calm_threshold", 30)
         angry = persona["mood"].get("angry_threshold", 70)
         furious = persona["mood"].get("furious_threshold", 90)
     else:
-        calm, angry, furious = 30, 70, 90
+        angry, furious = 70, 90
     parts.append(
         f"[MOOD] مزاجك دلوقتي {mood}/100. لو فوق {angry} انت متعصب، "
         f"ولو فوق {furious} انت غضبان جداً. [/MOOD]"

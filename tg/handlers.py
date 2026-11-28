@@ -120,6 +120,7 @@ from core.config import data_dir
 from core.persona import load_examples, load_persona
 from core.rules import is_owner
 from tools.search import fetch_many, fetch_page_text, web_search
+from tools.youtube import _is_bot_check_error as _yt_is_bot_check_error
 from tools.youtube import resolve_query as _yt_resolve_query
 from tools.youtube import search_query as _yt_search_query
 
@@ -685,25 +686,6 @@ def _get_usage_today() -> dict:
         return {"per_user": {int(u): int(n) for u, n in rows}, "group_total": 0, "by_chat": {}}
     except Exception:
         return {"per_user": {}, "group_total": 0, "by_chat": {}}
-
-
-def _get_provider_usage_today() -> list[dict]:
-    """Provider requests/tokens today from the router's provider_usage table."""
-    try:
-        c = sqlite3.connect(DB_PATH, timeout=10)
-        try:
-            rows = c.execute(
-                "SELECT provider, requests, tokens_in, tokens_out FROM provider_usage "
-                "WHERE date=date('now')"
-            ).fetchall()
-        finally:
-            c.close()
-        return [
-            {"provider": r[0], "requests": r[1], "tokens_in": r[2], "tokens_out": r[3]}
-            for r in rows
-        ]
-    except Exception:
-        return []
 
 
 def _prune_processed_updates(hours: int = 48) -> None:
@@ -1321,7 +1303,7 @@ def resolve_insult_target(text, *, reply_to_user=None, mentions=None, recent_spe
     return None, None, "none"
 
 
-async def _resolve_insult_level(context, chat_id, text, sender_insulted_bot, recent_rows, reply_to_user, mentions, owner_id):
+async def _resolve_insult_level(context, chat_id, text, recent_rows, reply_to_user, mentions, owner_id):
     """Return (level, target_name). Membership cached 10 min per (chat, user)."""
     target_id, target_name, _src = resolve_insult_target(
         text, reply_to_user=reply_to_user, mentions=mentions, recent_speakers=recent_rows
@@ -1752,7 +1734,7 @@ async def _send_yt_choice(msg, context, chat_id, user, query: str, resolved: dic
 
 # --- owner commands ---------------------------------------------------------
 
-async def _handle_owner_command(msg, user, text, context, settings) -> bool:
+async def _handle_owner_command(msg, user, text, context) -> bool:
     """Owner-only text commands. Returns True if handled. Runs before the trigger gate."""
     n = _norm(text)
     if n in ("اسكت يا بهجت", "اهدى يا بهجت", "بطل شتيمه", "بطل شتيمة", "اسكت بهجت", "اسكت", "اهدى"):
@@ -2095,7 +2077,7 @@ async def _on_group_message_inner(update: Update, context: ContextTypes.DEFAULT_
 
     # Owner commands BEFORE the trigger gate (group + DM).
     if is_owner(user.id, settings.owner_id):
-        if await _handle_owner_command(msg, user, text, context, settings):
+        if await _handle_owner_command(msg, user, text, context):
             return
 
     if not _should_reply(update, context.bot.username or ""):
@@ -2446,7 +2428,7 @@ async def _run_llm_turn(update, context, msg, user, chat_id, text, settings, rou
         if msg.reply_to_message is not None:
             reply_to_user = getattr(msg.reply_to_message, "from_user", None)
         insult_level, target_name = await _resolve_insult_level(
-            context, chat_id, text, insulted, speakers, reply_to_user, mentions, settings.owner_id
+            context, chat_id, text, speakers, reply_to_user, mentions, settings.owner_id
         )
 
         intent = intent_early
@@ -3099,11 +3081,7 @@ def _download_error_hint(exc: Exception) -> str:
     lesson stands: the generic line alone hid a code bug for a whole
     day, so the classified reason is kept — in the log, not the group."""
     s = str(exc or "").lower()
-    if any(m in s for m in (
-        "sign in to confirm", "not a bot", "confirm you're not a bot",
-        "bot-check", "bot check", "403", "forbidden", "player response",
-        "failed to extract",
-    )):
+    if _yt_is_bot_check_error(s):
         return "يوتيوب رافض الطلب من السيرفر"
     if "too large" in s or "larger than" in s:
         return "الملف أكبر من 50 ميجا"

@@ -58,12 +58,6 @@ from core.config import data_dir
 
 logger = logging.getLogger(__name__)
 
-# Pinned versions (Dockerfile installs these exact binaries; verified
-# 2026-11-27 in the VM: wgcf 2.3.1 is a static ELF, wireproxy 1.1.3 ships
-# as a tarball with a single `wireproxy` binary).
-WGCF_VERSION = "2.3.1"
-WIREPROXY_VERSION = "1.1.3"
-
 WARP_DIR_NAME = "warp"
 WGCF_ACCOUNT_FILE = "wgcf-account.toml"
 WGCF_PROFILE_FILE = "wgcf-profile.conf"

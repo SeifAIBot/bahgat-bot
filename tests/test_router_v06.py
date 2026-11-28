@@ -122,8 +122,9 @@ def test_groq_qwen_has_own_counter(tmp_path):
         cerebras_api_key="", nvidia_api_key="", openrouter_api_key=""))
     _seed(router, "groq-qwen", "qwen/qwen3.8-27b", tokens_in=180000)
     _seed(router, "groq-20b", "openai/gpt-oss-20b", tokens_in=1000)
-    assert router._provider_usage_today("groq-qwen") == (0, 180000, 0)
-    assert router._provider_usage_today("groq-20b") == (0, 1000, 0)
+    rows = {(p, m): (r, ti, to) for p, m, _d, r, ti, to in _rows(router)}
+    assert rows[("groq-qwen", "qwen/qwen3.8-27b")] == (0, 180000, 0)
+    assert rows[("groq-20b", "openai/gpt-oss-20b")] == (0, 1000, 0)
     # qwen exhausted, 20b fine: simple chat must not touch qwen first.
     calls = []
     router._client = lambda name: _FakeClient(calls)
@@ -135,10 +136,13 @@ def test_record_usage_is_per_model(tmp_path):
     router = _router(tmp_path)
     router._record_usage("groq-120b", 100, 50, model="openai/gpt-oss-120b")
     router._record_usage("groq-20b", 10, 5, model="openai/gpt-oss-20b")
-    assert router._provider_usage_today("groq-120b") == (1, 100, 50)
-    assert router._provider_usage_today("groq-20b") == (1, 10, 5)
+    rows = {(p, m): (r, ti, to) for p, m, _d, r, ti, to in _rows(router)}
+    assert rows[("groq-120b", "openai/gpt-oss-120b")] == (1, 100, 50)
+    assert rows[("groq-20b", "openai/gpt-oss-20b")] == (1, 10, 5)
     # Back-compat family read sums both.
-    assert router._provider_usage_today("groq") == (2, 110, 55)
+    fam = [v for (p, _m), v in rows.items()
+           if p == "groq" or p.startswith("groq-")]
+    assert tuple(sum(v[i] for v in fam) for i in range(3)) == (2, 110, 55)
 
 
 # --- migration from v0.5-shaped DB ------------------------------------------
@@ -156,23 +160,33 @@ def test_migration_from_v05_table(tmp_path):
     c.commit()
     c.close()
     # First use migrates: old row preserved with model=''.
-    assert router._provider_usage_today("groq") == (7, 90000, 1000)
+    c = sqlite3.connect(router.db)
+    router._ensure_usage_table(c)
+    c.close()
     rows = _rows(router)
     assert ("groq", "", _today(), 7, 90000, 1000) in rows
+    fam = [r for r in rows if r[0] == "groq" or r[0].startswith("groq-")]
+    assert (sum(r[3] for r in fam), sum(r[4] for r in fam),
+            sum(r[5] for r in fam)) == (7, 90000, 1000)
     sql = sqlite3.connect(db).execute(
         "SELECT sql FROM sqlite_master WHERE name='provider_usage'").fetchone()[0]
     assert "PRIMARY KEY(provider, model, date)" in sql
     # New per-model rows are separate from each other and from the legacy row.
     router._record_usage("groq-120b", 100, 10, model="openai/gpt-oss-120b")
     router._record_usage("groq-20b", 20, 5, model="openai/gpt-oss-20b")
-    # Per-entry reads sum the legacy (unattributable) row + the own row.
-    assert router._provider_usage_today("groq-120b") == (8, 90100, 1010)
-    assert router._provider_usage_today("groq-20b") == (8, 90020, 1005)
     rows = dict(((p, m), (r, ti, to)) for p, m, _d, r, ti, to in _rows(router))
     assert rows[("groq-120b", "openai/gpt-oss-120b")] == (1, 100, 10)
     assert rows[("groq-20b", "openai/gpt-oss-20b")] == (1, 20, 5)
-    # Migration is idempotent on a second read.
-    assert router._provider_usage_today("groq-120b") == (8, 90100, 1010)
+    # Per-entry reads sum the legacy (unattributable) row + the own row.
+    legacy = rows[("groq", "")]
+    assert tuple(legacy[i] + rows[("groq-120b", "openai/gpt-oss-120b")][i]
+                 for i in range(3)) == (8, 90100, 1010)
+    assert tuple(legacy[i] + rows[("groq-20b", "openai/gpt-oss-20b")][i]
+                 for i in range(3)) == (8, 90020, 1005)
+    # Migration is idempotent: the legacy row appears exactly once even
+    # after further writes re-ran the migration.
+    assert sum(1 for r in _rows(router)
+               if r[0] == "groq" and r[1] == "") == 1
 
 
 def test_mark_exhausted_is_per_model(tmp_path):

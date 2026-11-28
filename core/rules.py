@@ -81,10 +81,6 @@ def strip_instruction_patterns(text: str) -> str:
     return _INSTRUCTION_RE.sub("[محذوف]", text)
 
 
-def is_group_member(user_id: int, member_ids: set[int]) -> bool:
-    return user_id in member_ids
-
-
 def insult_level(target_user_id: int | None, member_ids: set[int]) -> str:
     """member -> 'personal_only', non-member / fictional -> 'full'"""
     if target_user_id is not None and target_user_id in member_ids:

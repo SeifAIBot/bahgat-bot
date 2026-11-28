@@ -47,7 +47,6 @@ def normalize_arabic(text: str) -> str:
 
 
 BANNED = ["كذكاء اصطناعي", "عذراً", "يسعدني مساعدتك", "لا أستطيع", "As an AI"]
-FAMILY = ["امك", "أمك", "ابوك", "أبوك", "اهلك", "عيلتك", "امك ", "ابوك "]
 FUSHA = ["إنني", "سوف أقوم", "هل تريد", "عذراً"]
 
 # v1.8: self-bot admission — Bahgat must NEVER say HE is a bot/AI
